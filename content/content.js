@@ -766,8 +766,19 @@
     
     const shadow = host.attachShadow({ mode: 'open' });
     
+    // Resolve platform colors dynamically
+    const colors = PLATFORM_COLORS[platform] || { primary: '#3b82f6', glow: 'rgba(59, 130, 246, 0.25)', bg: 'rgba(59, 130, 246, 0.05)' };
+
     const style = document.createElement('style');
     style.textContent = `
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+      :host {
+        --primary: ${colors.primary};
+        --primary-glow: ${colors.glow};
+        --primary-bg: ${colors.bg};
+      }
+
       .halo-container {
         all: initial !important;
         position: absolute !important;
@@ -781,10 +792,9 @@
         background-color: rgba(6, 8, 12, 0.4) !important;
         backdrop-filter: blur(0px) !important;
         -webkit-backdrop-filter: blur(0px) !important;
-        transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-                    backdrop-filter 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-                    -webkit-backdrop-filter 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        border: 1.5px solid rgba(0, 149, 255, 0.3) !important;
+        transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                    backdrop-filter 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                    -webkit-backdrop-filter 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
         will-change: opacity, backdrop-filter !important;
         display: flex !important;
         align-items: center !important;
@@ -793,8 +803,8 @@
       
       .halo-container.agent-active {
         opacity: 1 !important;
-        backdrop-filter: blur(4px) !important;
-        -webkit-backdrop-filter: blur(4px) !important;
+        backdrop-filter: blur(8px) !important;
+        -webkit-backdrop-filter: blur(8px) !important;
       }
 
       .halo-container::before {
@@ -804,155 +814,276 @@
         box-sizing: border-box !important;
         pointer-events: none !important;
         box-shadow: 
-          inset 0 0 30px rgba(0, 149, 255, 0.5),
-          inset 0 0 60px rgba(0, 149, 255, 0.25) !important;
-        opacity: 0.5 !important;
+          inset 0 0 40px rgba(0, 0, 0, 0.6),
+          inset 0 0 100px var(--primary-glow) !important;
+        opacity: 0 !important;
+        transition: opacity 0.6s ease !important;
         will-change: opacity !important;
       }
 
       .halo-container.agent-active::before {
-        animation: cc-glow-pulse 3s infinite cubic-bezier(0.4, 0, 0.2, 1) !important;
+        opacity: 0.6 !important;
+        animation: cc-glow-pulse 4s infinite cubic-bezier(0.4, 0, 0.2, 1) !important;
       }
 
       .console-card {
-        background: rgba(10, 14, 22, 0.85) !important;
-        border: 1px solid rgba(0, 149, 255, 0.3) !important;
-        border-radius: 16px !important;
+        background: linear-gradient(135deg, rgba(13, 16, 26, 0.78) 0%, rgba(8, 10, 16, 0.88) 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 20px !important;
         padding: 24px !important;
         width: 380px !important;
         box-shadow: 
-          0 25px 60px rgba(0, 0, 0, 0.7),
-          0 0 30px rgba(0, 149, 255, 0.15) !important;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+          0 25px 60px rgba(0, 0, 0, 0.65),
+          0 0 40px rgba(0, 0, 0, 0.3),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
         color: #f1f5f9 !important;
         display: flex !important;
         flex-direction: column !important;
         gap: 20px !important;
         backdrop-filter: blur(16px) !important;
         -webkit-backdrop-filter: blur(16px) !important;
-        transform: scale(0.93) !important;
-        transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+        transform: scale(0.95) translateY(10px) !important;
+        opacity: 0 !important;
+        transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
+                    opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
         box-sizing: border-box !important;
       }
 
       .halo-container.agent-active .console-card {
-        transform: scale(1) !important;
+        transform: scale(1) translateY(0) !important;
+        opacity: 1 !important;
       }
 
       .console-header {
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-        padding-bottom: 14px !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+        padding-bottom: 16px !important;
         box-sizing: border-box !important;
       }
 
-      .console-title {
-        font-size: 13px !important;
-        font-weight: 700 !important;
-        color: #0095FF !important;
-        letter-spacing: 1px !important;
-        font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
-        text-transform: uppercase !important;
+      .brand-wrapper {
         display: flex !important;
         align-items: center !important;
-        gap: 8px !important;
+        gap: 12px !important;
+      }
+
+      .brand-icon-container {
+        width: 32px !important;
+        height: 32px !important;
+        border-radius: 8px !important;
+        background: rgba(255, 255, 255, 0.03) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        color: var(--primary) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+        flex-shrink: 0 !important;
+      }
+
+      .brand-icon-container svg {
+        width: 18px !important;
+        height: 18px !important;
+      }
+
+      .title-stack {
+        display: flex !important;
+        flex-direction: column !important;
+      }
+
+      .console-title {
+        font-size: 13.5px !important;
+        font-weight: 700 !important;
+        color: #f8fafc !important;
+        letter-spacing: 0.5px !important;
+        text-transform: uppercase !important;
+        line-height: 1.2 !important;
+      }
+
+      .console-subtitle {
+        font-size: 8.5px !important;
+        font-weight: 600 !important;
+        color: #64748b !important;
+        letter-spacing: 1px !important;
+        text-transform: uppercase !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        margin-top: 3px !important;
+      }
+
+      .status-badge {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        background: var(--primary-bg) !important;
+        border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        padding: 4px 10px !important;
+        border-radius: 20px !important;
+        color: var(--primary) !important;
+        font-size: 9px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+        text-transform: uppercase !important;
+        box-sizing: border-box !important;
+        transition: all 0.3s ease !important;
+      }
+
+      .status-badge.completed {
+        background: rgba(52, 211, 153, 0.08) !important;
+        color: #34d399 !important;
+        border-color: rgba(52, 211, 153, 0.2) !important;
+      }
+
+      .status-badge.failed {
+        background: rgba(239, 68, 68, 0.08) !important;
+        color: #f87171 !important;
+        border-color: rgba(239, 68, 68, 0.2) !important;
+      }
+
+      .badge-dot {
+        width: 6px !important;
+        height: 6px !important;
+        background-color: currentColor !important;
+        border-radius: 50% !important;
+        box-shadow: 0 0 8px currentColor !important;
+        transition: all 0.3s ease !important;
+      }
+      
+      .status-badge:not(.completed):not(.failed) .badge-dot {
+        animation: cc-dot-pulse 1.2s infinite alternate ease-in-out !important;
       }
 
       .console-body {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 4px !important;
+        box-sizing: border-box !important;
+        position: relative !important;
+      }
+
+      /* Vertical Timeline Line */
+      .steps-container {
+        position: relative !important;
         display: flex !important;
         flex-direction: column !important;
         gap: 12px !important;
         box-sizing: border-box !important;
       }
 
+      .steps-container::before {
+        content: '' !important;
+        position: absolute !important;
+        left: 9px !important;
+        top: 14px !important;
+        bottom: 14px !important;
+        width: 1.5px !important;
+        background: linear-gradient(to bottom, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05)) !important;
+        z-index: 1 !important;
+      }
+
       .step-item {
         display: flex !important;
         align-items: center !important;
-        gap: 12px !important;
+        gap: 14px !important;
         font-size: 13px !important;
-        font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+        font-weight: 500 !important;
         opacity: 0.35 !important;
         color: #94a3b8 !important;
         transition: opacity 0.3s ease, color 0.3s ease !important;
         box-sizing: border-box !important;
+        position: relative !important;
+        z-index: 2 !important;
+        padding: 4px 0 !important;
       }
 
       .step-item.active {
         opacity: 1 !important;
-        color: #38bdf8 !important;
+        color: #e2e8f0 !important;
       }
 
       .step-item.completed {
-        opacity: 0.95 !important;
-        color: #34d399 !important;
+        opacity: 0.8 !important;
+        color: #94a3b8 !important;
       }
 
       .step-icon {
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        width: 16px !important;
-        height: 16px !important;
+        width: 20px !important;
+        height: 20px !important;
         flex-shrink: 0 !important;
+        position: relative !important;
       }
 
-      .spinner {
-        width: 10px !important;
-        height: 10px !important;
-        border: 2px solid rgba(0, 149, 255, 0.15) !important;
-        border-top: 2px solid #0095FF !important;
-        border-radius: 50% !important;
-        animation: cc-spin 0.8s linear infinite !important;
+      .step-text {
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        font-weight: 500 !important;
       }
 
+      /* Step Icon Shapes */
       .dot {
         width: 6px !important;
         height: 6px !important;
-        background-color: rgba(255, 255, 255, 0.25) !important;
+        background-color: rgba(255, 255, 255, 0.2) !important;
         border-radius: 50% !important;
+        transition: all 0.3s ease !important;
       }
 
-      .check {
-        color: #34d399 !important;
-        font-weight: 700 !important;
-        font-size: 13px !important;
+      .spinner {
+        width: 12px !important;
+        height: 12px !important;
+        border: 2px solid rgba(255, 255, 255, 0.05) !important;
+        border-top: 2px solid var(--primary) !important;
+        border-radius: 50% !important;
+        animation: cc-spin 0.6s linear infinite !important;
       }
 
-      .agent-badge {
+      .check-circle {
+        width: 20px !important;
+        height: 20px !important;
+        border-radius: 50% !important;
+        background: rgba(52, 211, 153, 0.1) !important;
+        border: 1px solid rgba(52, 211, 153, 0.2) !important;
         display: flex !important;
         align-items: center !important;
-        gap: 6px !important;
-        background: rgba(0, 149, 255, 0.1) !important;
-        border: 1px solid rgba(0, 149, 255, 0.3) !important;
-        padding: 3px 8px !important;
-        border-radius: 12px !important;
-        color: #38bdf8 !important;
-        font-size: 9px !important;
-        font-weight: 700 !important;
-        letter-spacing: 0.5px !important;
-        text-transform: uppercase !important;
-        box-sizing: border-box !important;
+        justify-content: center !important;
+        animation: cc-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards !important;
       }
 
-      .badge-dot {
-        width: 5px !important;
-        height: 5px !important;
-        background-color: #38bdf8 !important;
+      .cross-circle {
+        width: 20px !important;
+        height: 20px !important;
         border-radius: 50% !important;
-        box-shadow: 0 0 6px #38bdf8 !important;
-        animation: cc-dot-pulse 1.2s infinite alternate ease-in-out !important;
+        background: rgba(239, 68, 68, 0.1) !important;
+        border: 1px solid rgba(239, 68, 68, 0.2) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        animation: cc-shake 0.4s ease-in-out forwards !important;
+      }
+
+      @keyframes cc-pop {
+        0% { transform: scale(0.6); opacity: 0; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+
+      @keyframes cc-shake {
+        0%, 100% { transform: translateX(0); }
+        20%, 60% { transform: translateX(-2px); }
+        40%, 80% { transform: translateX(2px); }
       }
 
       @keyframes cc-glow-pulse {
-        0%, 100% { opacity: 0.45 !important; }
-        50% { opacity: 0.85 !important; }
+        0%, 100% { opacity: 0.3 !important; }
+        50% { opacity: 0.6 !important; }
       }
 
       @keyframes cc-dot-pulse {
-        from { opacity: 0.4 !important; transform: scale(0.8) !important; }
-        to { opacity: 1 !important; transform: scale(1.2) !important; }
+        from { opacity: 0.4 !important; transform: scale(0.85) !important; }
+        to { opacity: 1 !important; transform: scale(1.15) !important; }
       }
 
       @keyframes cc-spin {
@@ -971,17 +1102,32 @@
     const header = document.createElement('div');
     header.className = 'console-header';
     
+    const brandWrapper = document.createElement('div');
+    brandWrapper.className = 'brand-wrapper';
+    
+    const brandIconContainer = document.createElement('div');
+    brandIconContainer.className = 'brand-icon-container';
+    brandIconContainer.innerHTML = getDropOverlayIcon(platform);
+    
+    const titleStack = document.createElement('div');
+    titleStack.className = 'title-stack';
+    
     const titleDiv = document.createElement('div');
     titleDiv.className = 'console-title';
-    titleDiv.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px; animation: cc-spin 2s linear infinite;">
-        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-      </svg>
-      CROSS CONTEXT ENGINE
-    `;
+    titleDiv.textContent = 'CROSS CONTEXT';
+    
+    const subtitleDiv = document.createElement('div');
+    subtitleDiv.className = 'console-subtitle';
+    subtitleDiv.textContent = 'Extraction Pipeline';
+    
+    titleStack.appendChild(titleDiv);
+    titleStack.appendChild(subtitleDiv);
+    
+    brandWrapper.appendChild(brandIconContainer);
+    brandWrapper.appendChild(titleStack);
     
     const badge = document.createElement('div');
-    badge.className = 'agent-badge';
+    badge.className = 'status-badge';
     
     const dot = document.createElement('div');
     dot.className = 'badge-dot';
@@ -992,11 +1138,14 @@
     badge.appendChild(dot);
     badge.appendChild(label);
     
-    header.appendChild(titleDiv);
+    header.appendChild(brandWrapper);
     header.appendChild(badge);
     
     const body = document.createElement('div');
     body.className = 'console-body';
+    
+    const stepsContainer = document.createElement('div');
+    stepsContainer.className = 'steps-container';
     
     const steps = [
       'Detecting active platform...',
@@ -1020,9 +1169,10 @@
       
       stepDiv.appendChild(iconDiv);
       stepDiv.appendChild(textSpan);
-      body.appendChild(stepDiv);
+      stepsContainer.appendChild(stepDiv);
     });
     
+    body.appendChild(stepsContainer);
     consoleCard.appendChild(header);
     consoleCard.appendChild(body);
     container.appendChild(consoleCard);
@@ -1044,7 +1194,13 @@
         iconContainer.innerHTML = '<div class="spinner"></div>';
       } else if (state === 'completed') {
         stepEl.classList.add('completed');
-        iconContainer.innerHTML = '<div class="check">✓</div>';
+        iconContainer.innerHTML = `
+          <div class="check-circle">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </div>
+        `;
       }
     }
 
@@ -1095,6 +1251,10 @@
       success: () => {
         isFinished = true;
         timeouts.forEach(clearTimeout);
+        
+        badge.className = 'status-badge completed';
+        label.textContent = 'COMPLETED';
+
         // Set all to completed
         setStepState(0, 'completed');
         setStepState(1, 'completed');
@@ -1107,6 +1267,9 @@
         isFinished = true;
         timeouts.forEach(clearTimeout);
         
+        badge.className = 'status-badge failed';
+        label.textContent = 'FAILED';
+        
         // Find first step that isn't completed and mark as failed
         for (let i = 0; i < 5; i++) {
           const stepEl = shadow.getElementById(`cc-step-${i}`);
@@ -1115,7 +1278,14 @@
             stepEl.style.color = '#ef4444';
             const icon = stepEl.querySelector('.step-icon');
             if (icon) {
-              icon.innerHTML = '<span style="color: #ef4444; font-weight: bold; font-size: 13px;">✗</span>';
+              icon.innerHTML = `
+                <div class="cross-circle">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </div>
+              `;
             }
             const text = stepEl.querySelector('.step-text');
             if (text) {
