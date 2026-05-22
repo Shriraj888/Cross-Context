@@ -1218,8 +1218,8 @@ Please confirm you have the full context above and are ready to continue the con
     // Remove existing overlay
     removeDropOverlay();
 
-    const colors = PLATFORM_COLORS[srcPlatform] || { primary: '#00F2FE', glow: 'rgba(0,242,254,0.3)', bg: 'rgba(0,242,254,0.05)' };
-    const currentColors = PLATFORM_COLORS[platform] || { primary: '#00F2FE', glow: 'rgba(0,242,254,0.3)', bg: 'rgba(0,242,254,0.05)' };
+    const colors = PLATFORM_COLORS[srcPlatform] || { primary: '#3b82f6', glow: 'rgba(59, 130, 246, 0.25)', bg: 'rgba(59, 130, 246, 0.05)' };
+    const currentColors = PLATFORM_COLORS[platform] || { primary: '#3b82f6', glow: 'rgba(59, 130, 246, 0.25)', bg: 'rgba(59, 130, 246, 0.05)' };
 
     dropOverlayHost = document.createElement('div');
     dropOverlayHost.id = '__cross-context-drop-host';
@@ -1243,171 +1243,405 @@ Please confirm you have the full context above and are ready to continue the con
       .drop-overlay {
         position: fixed !important;
         inset: 0 !important;
-        background: rgba(6, 8, 12, 0.72) !important;
-        backdrop-filter: blur(6px) !important;
-        -webkit-backdrop-filter: blur(6px) !important;
+        background: rgba(8, 10, 16, 0) !important;
+        backdrop-filter: blur(0px) !important;
+        -webkit-backdrop-filter: blur(0px) !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
         opacity: 0 !important;
-        transition: opacity 0.2s ease !important;
+        transition: opacity 0.3s ease, backdrop-filter 0.3s ease, -webkit-backdrop-filter 0.3s ease !important;
         pointer-events: none !important;
-        border: 3px solid transparent !important;
         box-sizing: border-box !important;
+      }
+
+      .drop-overlay::before {
+        content: '' !important;
+        position: absolute !important;
+        inset: 20px !important;
+        border: 1.5px dashed ${colors.primary}30 !important;
+        border-radius: 20px !important;
+        pointer-events: none !important;
+        opacity: 0 !important;
+        transition: opacity 0.3s ease, transform 0.3s ease, border-color 0.3s ease !important;
+        transform: scale(0.98) !important;
+        box-sizing: border-box !important;
+        z-index: 1 !important;
       }
 
       .drop-overlay.visible {
         opacity: 1 !important;
-        border-color: ${colors.primary} !important;
-        box-shadow: inset 0 0 60px ${colors.glow}, 0 0 0 3px ${colors.glow} !important;
-        animation: border-pulse 1.8s ease-in-out infinite !important;
+        background: rgba(8, 10, 16, 0.65) !important;
+        backdrop-filter: blur(10px) !important;
+        -webkit-backdrop-filter: blur(10px) !important;
+        box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.8),
+                    inset 0 0 40px ${colors.primary}10 !important;
+      }
+
+      .drop-overlay.visible::before {
+        opacity: 1 !important;
+        transform: scale(1) !important;
       }
 
       .drop-overlay.over {
-        border-color: ${currentColors.primary} !important;
-        box-shadow: inset 0 0 80px ${currentColors.glow}, 0 0 0 3px ${currentColors.glow} !important;
-        animation: none !important;
+        background: rgba(8, 10, 16, 0.72) !important;
+        box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.9),
+                    inset 0 0 60px ${currentColors.primary}18 !important;
       }
 
-      @keyframes border-pulse {
-        0%, 100% { box-shadow: inset 0 0 40px ${colors.glow}, 0 0 0 2px ${colors.glow}; }
-        50%       { box-shadow: inset 0 0 80px ${colors.glow}, 0 0 0 4px ${colors.glow}; }
+      .drop-overlay.over::before {
+        border-color: ${currentColors.primary}50 !important;
+        border-style: solid !important;
+        box-shadow: 0 0 30px ${currentColors.primary}10 !important;
+        transform: scale(0.99) !important;
       }
 
       .drop-card {
-        background: rgba(10, 14, 22, 0.9) !important;
-        border: 1.5px solid ${colors.primary}40 !important;
-        border-radius: 20px !important;
-        padding: 36px 44px !important;
+        background: rgba(15, 18, 28, 0.85) !important;
+        border: 1px solid ${colors.primary}25 !important;
+        border-radius: 24px !important;
+        padding: 36px 40px !important;
         display: flex !important;
         flex-direction: column !important;
         align-items: center !important;
-        gap: 16px !important;
-        box-shadow: 0 30px 80px rgba(0,0,0,0.8), 0 0 40px ${colors.glow} !important;
-        transform: scale(0.9) !important;
-        transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.2s !important;
+        gap: 20px !important;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6),
+                    0 0 50px ${colors.primary}10 !important;
+        transform: scale(0.95) translateY(10px) !important;
+        transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                    border-color 0.3s ease,
+                    box-shadow 0.3s ease !important;
         pointer-events: none !important;
         backdrop-filter: blur(20px) !important;
         -webkit-backdrop-filter: blur(20px) !important;
         text-align: center !important;
-        max-width: 360px !important;
+        width: 320px !important;
+        box-sizing: border-box !important;
+        z-index: 2 !important;
       }
 
       .drop-overlay.visible .drop-card {
-        transform: scale(1) !important;
+        transform: scale(1) translateY(0) !important;
       }
 
       .drop-overlay.over .drop-card {
-        transform: scale(1.04) !important;
-        border-color: ${currentColors.primary}80 !important;
-        box-shadow: 0 30px 80px rgba(0,0,0,0.8), 0 0 60px ${currentColors.glow} !important;
+        transform: scale(1.03) !important;
+        border-color: ${currentColors.primary}50 !important;
+        box-shadow: 0 40px 100px rgba(0, 0, 0, 0.7),
+                    0 0 60px ${currentColors.primary}20 !important;
       }
 
-      .drop-icon {
-        width: 64px !important;
-        height: 64px !important;
-        border-radius: 18px !important;
+      .drop-flow {
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        background: ${colors.bg} !important;
-        border: 1.5px solid ${colors.primary}40 !important;
+        gap: 16px !important;
+        width: 100% !important;
+        margin-bottom: 8px !important;
+        z-index: 2 !important;
+      }
+
+      .drop-flow-connector {
+        flex: 1 !important;
+        max-width: 60px !important;
+        height: 3px !important;
+        background: rgba(255, 255, 255, 0.08) !important;
+        border-radius: 2px !important;
+        position: relative !important;
+        overflow: hidden !important;
+        transition: background 0.3s ease !important;
+      }
+
+      .drop-flow-connector::after {
+        content: '' !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: linear-gradient(90deg, transparent, ${colors.primary}, ${currentColors.primary}, transparent) !important;
+        transform: translateX(-100%) !important;
+        animation: flow-shimmer 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+      }
+
+      @keyframes flow-shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+      }
+
+      .drop-icon {
+        width: 60px !important;
+        height: 60px !important;
+        border-radius: 16px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background: ${colors.primary}10 !important;
+        border: 1px solid ${colors.primary}30 !important;
         color: ${colors.primary} !important;
         flex-shrink: 0 !important;
-        animation: icon-bob 2s ease-in-out infinite !important;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15) !important;
+        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
       }
 
-      @keyframes icon-bob {
-        0%, 100% { transform: translateY(0); }
-        50%       { transform: translateY(-5px); }
+      .drop-icon.source-icon {
+        animation: icon-float-src 3s ease-in-out infinite !important;
       }
 
-      .drop-overlay.over .drop-icon {
-        animation: none !important;
-        transform: scale(1.1) !important;
-        background: ${currentColors.bg} !important;
-        border-color: ${currentColors.primary}60 !important;
+      .drop-icon.target-icon {
+        background: ${currentColors.primary}10 !important;
+        border-color: ${currentColors.primary}30 !important;
         color: ${currentColors.primary} !important;
+        animation: icon-float-tgt 3s ease-in-out infinite alternate-reverse !important;
+      }
+
+      @keyframes icon-float-src {
+        0%, 100% { transform: translateY(0) rotate(-1deg); }
+        50%       { transform: translateY(-4px) rotate(1deg); }
+      }
+
+      @keyframes icon-float-tgt {
+        0%, 100% { transform: translateY(0) rotate(1deg); }
+        50%       { transform: translateY(-4px) rotate(-1deg); }
+      }
+
+      .drop-overlay.over .drop-icon.source-icon {
+        animation: none !important;
+        transform: scale(1.08) rotate(-3deg) !important;
+        background: ${colors.primary}15 !important;
+        border-color: ${colors.primary}50 !important;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25), 0 0 15px ${colors.primary}20 !important;
+      }
+
+      .drop-overlay.over .drop-icon.target-icon {
+        animation: none !important;
+        transform: scale(1.08) rotate(3deg) !important;
+        background: ${currentColors.primary}15 !important;
+        border-color: ${currentColors.primary}50 !important;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25), 0 0 15px ${currentColors.primary}20 !important;
       }
 
       .drop-title {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
-        font-size: 18px !important;
-        font-weight: 700 !important;
-        color: #f4f4f5 !important;
-        letter-spacing: -0.3px !important;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        font-size: 19px !important;
+        font-weight: 600 !important;
+        color: #ffffff !important;
+        letter-spacing: -0.01em !important;
         margin: 0 !important;
+        transition: color 0.3s ease !important;
       }
 
       .drop-subtitle {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
-        font-size: 13px !important;
-        color: rgba(161, 161, 170, 0.9) !important;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        font-size: 13.5px !important;
+        color: #94a3b8 !important;
         margin: 0 !important;
         line-height: 1.5 !important;
+        transition: color 0.3s ease !important;
       }
 
       .drop-subtitle strong {
         color: ${colors.primary} !important;
         font-weight: 600 !important;
+        transition: color 0.3s ease !important;
+      }
+
+      .drop-overlay.over .drop-subtitle strong {
+        color: ${currentColors.primary} !important;
       }
 
       .drop-arrow {
-        color: rgba(161,161,170,0.5) !important;
-        animation: arrow-bounce 1s ease-in-out infinite alternate !important;
+        color: rgba(148, 163, 184, 0.4) !important;
+        margin-top: 4px !important;
+        animation: arrow-bounce-new 2s ease-in-out infinite !important;
+        transition: color 0.3s ease !important;
       }
 
-      @keyframes arrow-bounce {
-        from { transform: translateY(-3px); opacity: 0.4; }
-        to   { transform: translateY(3px);  opacity: 0.9; }
+      @keyframes arrow-bounce-new {
+        0%, 100% { transform: translateY(0); opacity: 0.3; }
+        50%       { transform: translateY(5px);  opacity: 0.8; }
       }
 
       /* Injecting state */
       .drop-overlay.injecting .drop-card {
         transform: scale(1) !important;
-        border-color: #0095FF40 !important;
-        box-shadow: 0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(0,149,255,0.3) !important;
+        border-color: #3b82f640 !important;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 50px rgba(59,130,246,0.15) !important;
       }
 
-      .drop-overlay.injecting .drop-icon {
-        animation: spin-icon 0.8s linear infinite !important;
-        background: rgba(0,149,255,0.08) !important;
-        border-color: #0095FF60 !important;
-        color: #38bdf8 !important;
+      .drop-overlay.injecting::before {
+        border-color: #3b82f640 !important;
+        border-style: dashed !important;
+        animation: pulse-border 1.5s ease-in-out infinite !important;
       }
 
-      @keyframes spin-icon {
-        from { transform: rotate(0deg); }
-        to   { transform: rotate(360deg); }
+      @keyframes pulse-border {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 0.8; }
       }
 
-      .drop-overlay.injecting .drop-title { color: #38bdf8 !important; }
+      .drop-overlay.injecting .drop-flow-connector {
+        background: rgba(59, 130, 246, 0.15) !important;
+      }
+
+      .drop-overlay.injecting .drop-flow-connector::after {
+        background: linear-gradient(90deg, transparent, #3b82f6, #10b981, transparent) !important;
+        animation: flow-shimmer 0.5s linear infinite !important;
+      }
+
+      .drop-overlay.injecting .drop-icon.source-icon {
+        animation: none !important;
+        background: rgba(59,130,246,0.08) !important;
+        border-color: rgba(59,130,246,0.4) !important;
+        color: #3b82f6 !important;
+      }
+
+      .drop-overlay.injecting .drop-icon.target-icon {
+        animation: pulse-target 1s ease-in-out infinite alternate !important;
+        border-color: #3b82f660 !important;
+        box-shadow: 0 0 15px rgba(59, 130, 246, 0.3) !important;
+      }
+
+      @keyframes pulse-target {
+        from { transform: scale(1); opacity: 0.7; }
+        to { transform: scale(1.05); opacity: 1; }
+      }
+
+      /* Custom Material-style circular spinner */
+      .cc-spinner {
+        animation: cc-rotate 1.6s linear infinite !important;
+        display: block !important;
+        color: #3b82f6 !important;
+      }
+
+      .cc-spinner-path {
+        stroke-dasharray: 125 !important;
+        stroke-dashoffset: 125 !important;
+        animation: cc-dash 1.6s ease-in-out infinite !important;
+      }
+
+      @keyframes cc-rotate {
+        100% { transform: rotate(360deg) !important; }
+      }
+
+      @keyframes cc-dash {
+        0% {
+          stroke-dashoffset: 120 !important;
+        }
+        50% {
+          stroke-dashoffset: 30 !important;
+          transform: rotate(135deg) !important;
+        }
+        100% {
+          stroke-dashoffset: 120 !important;
+          transform: rotate(450deg) !important;
+        }
+      }
+
+      .drop-overlay.injecting .drop-arrow {
+        animation: none !important;
+        margin-top: 8px !important;
+      }
+
+      .drop-overlay.success .drop-arrow {
+        animation: success-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
+        color: #10b981 !important;
+        margin-top: 8px !important;
+      }
+
+      .drop-overlay.error-state .drop-arrow {
+        animation: shake 0.4s ease-in-out !important;
+        color: #ef4444 !important;
+        margin-top: 8px !important;
+      }
+
+      .drop-overlay.injecting .drop-title { color: #3b82f6 !important; }
 
       /* Success state */
       .drop-overlay.success .drop-card {
         border-color: #10b98140 !important;
-        box-shadow: 0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(16,185,129,0.3) !important;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 50px rgba(16,185,129,0.15) !important;
       }
 
-      .drop-overlay.success .drop-icon {
+      .drop-overlay.success::before {
+        border-color: #10b98150 !important;
+        border-style: solid !important;
+      }
+
+      .drop-overlay.success .drop-flow-connector {
+        background: rgba(16, 185, 129, 0.2) !important;
+      }
+
+      .drop-overlay.success .drop-flow-connector::after {
+        background: #10b981 !important;
+        transform: translateX(0) !important;
         animation: none !important;
-        background: rgba(16,185,129,0.08) !important;
-        border-color: #10b98160 !important;
-        color: #34d399 !important;
-        transform: scale(1) !important;
       }
 
-      .drop-overlay.success .drop-title { color: #34d399 !important; }
+      .drop-overlay.success .drop-icon.source-icon {
+        animation: success-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
+        background: rgba(16,185,129,0.1) !important;
+        border-color: rgba(16,185,129,0.4) !important;
+        color: #10b981 !important;
+      }
+
+      .drop-overlay.success .drop-icon.target-icon {
+        animation: none !important;
+        border-color: rgba(16, 185, 129, 0.4) !important;
+        background: rgba(16, 185, 129, 0.1) !important;
+        color: #10b981 !important;
+      }
+
+      @keyframes success-pop {
+        0% { transform: scale(0.8); }
+        100% { transform: scale(1.1); }
+      }
+
+      .drop-overlay.success .drop-title { color: #10b981 !important; }
+      .drop-overlay.success .drop-subtitle strong { color: #10b981 !important; }
 
       /* Error state */
-      .drop-overlay.error-state .drop-icon {
-        animation: none !important;
-        background: rgba(239,68,68,0.08) !important;
-        border-color: #ef444460 !important;
-        color: #f87171 !important;
+      .drop-overlay.error-state .drop-card {
+        border-color: #ef444440 !important;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 50px rgba(239,68,68,0.15) !important;
       }
 
-      .drop-overlay.error-state .drop-title { color: #f87171 !important; }
+      .drop-overlay.error-state::before {
+        border-color: #ef444450 !important;
+        border-style: solid !important;
+      }
+
+      .drop-overlay.error-state .drop-flow-connector {
+        background: rgba(239, 68, 68, 0.2) !important;
+      }
+
+      .drop-overlay.error-state .drop-flow-connector::after {
+        background: #ef4444 !important;
+        transform: translateX(0) !important;
+        animation: none !important;
+      }
+
+      .drop-overlay.error-state .drop-icon.source-icon {
+        animation: shake 0.4s ease-in-out !important;
+        background: rgba(239,68,68,0.1) !important;
+        border-color: rgba(239,68,68,0.4) !important;
+        color: #ef4444 !important;
+      }
+
+      .drop-overlay.error-state .drop-icon.target-icon {
+        animation: none !important;
+        border-color: rgba(239, 68, 68, 0.4) !important;
+        background: rgba(239, 68, 68, 0.1) !important;
+        color: #ef4444 !important;
+      }
+
+      @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        20%, 60% { transform: translateX(-4px); }
+        40%, 80% { transform: translateX(4px); }
+      }
+
+      .drop-overlay.error-state .drop-title { color: #ef4444 !important; }
     `;
     dropOverlayShadow.appendChild(style);
 
@@ -1418,10 +1652,25 @@ Please confirm you have the full context above and are ready to continue the con
     const card = document.createElement('div');
     card.className = 'drop-card';
 
+    const flowContainer = document.createElement('div');
+    flowContainer.className = 'drop-flow';
+
     const iconEl = document.createElement('div');
-    iconEl.className = 'drop-icon';
+    iconEl.className = 'drop-icon source-icon';
     iconEl.id = 'cc-drop-icon';
     iconEl.innerHTML = getDropOverlayIcon(srcPlatform);
+
+    const connectorEl = document.createElement('div');
+    connectorEl.className = 'drop-flow-connector';
+
+    const targetIconEl = document.createElement('div');
+    targetIconEl.className = 'drop-icon target-icon';
+    targetIconEl.id = 'cc-drop-icon-target';
+    targetIconEl.innerHTML = getDropOverlayIcon(platform);
+
+    flowContainer.appendChild(iconEl);
+    flowContainer.appendChild(connectorEl);
+    flowContainer.appendChild(targetIconEl);
 
     const titleEl = document.createElement('div');
     titleEl.className = 'drop-title';
@@ -1435,9 +1684,10 @@ Please confirm you have the full context above and are ready to continue the con
 
     const arrowEl = document.createElement('div');
     arrowEl.className = 'drop-arrow';
-    arrowEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`;
+    arrowEl.id = 'cc-drop-arrow';
+    arrowEl.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`;
 
-    card.appendChild(iconEl);
+    card.appendChild(flowContainer);
     card.appendChild(titleEl);
     card.appendChild(subtitleEl);
     card.appendChild(arrowEl);
@@ -1467,9 +1717,14 @@ Please confirm you have the full context above and are ready to continue the con
   }
 
   // Spinner SVG for injecting state
-  const SPINNER_SVG = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>`;
-  const CHECK_SVG   = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-  const ERROR_SVG   = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+  const SPINNER_SVG = `
+    <svg class="cc-spinner" viewBox="0 0 50 50" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+      <circle class="cc-spinner-bg" cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4.5" opacity="0.15"></circle>
+      <circle class="cc-spinner-path" cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"></circle>
+    </svg>
+  `;
+  const CHECK_SVG   = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+  const ERROR_SVG   = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
 
   // Track whether a Cross Context drag is in flight (set via storage.onChanged or MIME types)
   let ccDragActive = false;
@@ -1562,10 +1817,11 @@ Please confirm you have the full context above and are ready to continue the con
     const iconEl  = dropOverlayShadow?.getElementById('cc-drop-icon');
     const titleEl = dropOverlayShadow?.getElementById('cc-drop-title');
     const subEl   = dropOverlayShadow?.getElementById('cc-drop-subtitle');
+    const arrowEl = dropOverlayShadow?.getElementById('cc-drop-arrow');
 
     // Move to injecting state immediately (visible to user)
     if (ol)    { ol.classList.remove('over'); ol.classList.add('injecting'); }
-    if (iconEl)  iconEl.innerHTML  = SPINNER_SVG;
+    if (arrowEl) arrowEl.innerHTML  = SPINNER_SVG;
     if (titleEl) titleEl.textContent = 'Injecting...';
     if (subEl)   subEl.textContent   = 'Reading conversation…';
 
@@ -1596,7 +1852,7 @@ Please confirm you have the full context above and are ready to continue the con
     const hasFallbackText = plainText && plainText.includes('[🔄 Cross Context Transfer]');
     if (!contextId && !hasFallbackText) {
       if (ol) ol.classList.add('error-state');
-      if (iconEl)  iconEl.innerHTML  = ERROR_SVG;
+      if (arrowEl) arrowEl.innerHTML  = ERROR_SVG;
       if (titleEl) titleEl.textContent = 'Drop failed';
       if (subEl)   subEl.textContent   = 'Could not find context ID or fallback payload.';
       setTimeout(removeDropOverlay, 2500);
@@ -1642,7 +1898,7 @@ Please confirm you have the full context above and are ready to continue the con
 
       // ✅ Success
       if (ol) { ol.classList.remove('injecting'); ol.classList.add('success'); }
-      if (iconEl)  iconEl.innerHTML  = CHECK_SVG;
+      if (arrowEl) arrowEl.innerHTML  = CHECK_SVG;
       if (titleEl) titleEl.textContent = 'Context injected!';
       if (subEl) {
         const srcName = PLATFORM_NAMES[srcPlatform] || srcPlatform;
@@ -1652,7 +1908,7 @@ Please confirm you have the full context above and are ready to continue the con
 
     } catch (err) {
       if (ol) { ol.classList.remove('injecting'); ol.classList.add('error-state'); }
-      if (iconEl)  iconEl.innerHTML  = ERROR_SVG;
+      if (arrowEl) arrowEl.innerHTML  = ERROR_SVG;
       if (titleEl) titleEl.textContent = 'Injection failed';
       if (subEl)   subEl.textContent   = err.message || 'An unexpected error occurred.';
       setTimeout(removeDropOverlay, 3500);

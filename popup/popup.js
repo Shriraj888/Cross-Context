@@ -159,7 +159,7 @@ async function detectCurrentTab() {
         platformDot.className = `platform-dot active dot-${key}`;
         platformDot.innerHTML = getPlatformIcon(key, 14);
         platformDot.style.color = getComputedStyle(document.documentElement)
-          .getPropertyValue(`--${key}`) || '#00F2FE';
+          .getPropertyValue(`--${key}`) || '#3b82f6';
         btnCapture.disabled = false;
         return;
       }
