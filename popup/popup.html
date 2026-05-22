@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cross Context</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+
+<body>
+
+  <!-- ── Header ─────────────────────────────── -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="logo">
+        <img src="../icons/icon128.png" alt="Cross Context Logo" />
+      </div>
+      <div class="brand-info">
+        <div class="brand-name">Cross Context</div>
+        <div class="brand-tagline">Cross-LLM Context Sharing</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-clear-all" class="icon-btn" title="Clear all saved contexts">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6l-1 14H6L5 6" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+          <path d="M9 6V4h6v2" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Current Page Capture ───────────────── -->
+  <section class="capture-section">
+    <div class="current-platform-info" id="current-platform-info">
+      <div class="platform-dot" id="platform-dot"></div>
+      <span id="current-platform-label">Detecting page…</span>
+    </div>
+    <button id="btn-capture" class="btn-capture" disabled>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="17 8 12 3 7 8" />
+        <line x1="12" y1="3" x2="12" y2="15" />
+      </svg>
+      Capture Conversation
+    </button>
+  </section>
+
+  <!-- ── Toast Notification ─────────────────── -->
+  <div id="toast" class="toast" role="alert" aria-live="polite"></div>
+
+
+  <!-- ── Saved Contexts ─────────────────────── -->
+  <section class="contexts-section">
+    <div class="section-header">
+      <h2 class="section-title">Saved Contexts</h2>
+      <span id="context-count" class="context-count-badge">0</span>
+    </div>
+
+    <div id="contexts-list" class="contexts-list">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">💬</div>
+        <p class="empty-title">No saved contexts yet</p>
+        <p class="empty-sub">Open an LLM conversation and click<br>"Capture Conversation" above.</p>
+      </div>
+    </div>
+  </section>
+
+
+
+  <!-- ── Preview Modal ──────────────────────── -->
+  <div id="preview-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Preview context">
+    <div class="modal-card preview-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Preview Context</h3>
+        <button id="preview-close" class="icon-btn modal-close-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div id="preview-content" class="preview-content"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>

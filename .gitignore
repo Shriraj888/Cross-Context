@@ -1,0 +1,34 @@
+# OS Metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE & Editor configurations
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Local/Development configurations
+*.local
+.env
+.env.*
+!.env.example
+
+# Extension builds/packages (in case they package it later)
+*.zip
+*.crx
+*.pem
+
+# Dependency directories (if npm is added later)
+node_modules/
+jspm_packages/
+web_modules/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

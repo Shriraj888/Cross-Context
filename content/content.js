@@ -1,0 +1,1785 @@
+// Cross Context — Content Script Dispatcher
+// Runs on all supported LLM pages
+// NOTE: Content scripts cannot use ES module dynamic import().
+// All platform logic is bundled inline here.
+
+(async () => {
+  'use strict';
+
+  // ──────────────────────────────────────────
+  // Platform Detection
+  // ──────────────────────────────────────────
+  const hostname = window.location.hostname;
+  const pathname = window.location.pathname;
+
+  function detectPlatform() {
+    if (hostname.includes('claude.ai'))         return 'claude';
+    if (hostname.includes('chatgpt.com'))       return 'chatgpt';
+    if (hostname.includes('gemini.google.com')) return 'gemini';
+    if (hostname.includes('grok.com'))          return 'grok';
+    if (hostname.includes('x.com') && pathname.includes('grok')) return 'grok';
+    if (hostname.includes('perplexity.ai'))     return 'perplexity';
+    return null;
+  }
+
+  const platform = detectPlatform();
+  if (!platform) return;
+
+  // Idempotent listener registration: remove old listener before adding new one.
+  // This handles extension reloads — Chrome removes content scripts but keeps
+  // window vars, so a window-flag guard would block fresh re-injection.
+  if (window.__crossContextListener) {
+    chrome.runtime.onMessage.removeListener(window.__crossContextListener);
+    window.__crossContextListener = null;
+  }
+
+  // ════════════════════════════════════════════
+  // SCRAPERS — one per platform
+  // ════════════════════════════════════════════
+
+  // Use innerText on the LIVE (attached) element — not a detached clone.
+  // innerText on an attached element correctly returns only visible rendered text.
+  // Detached clones always return "" for innerText (no layout engine).
+  // Get clean text while preserving layout (newlines, block structure) via temporary attachment.
+  // This prunes all UI chrome (copy buttons, thumbs, actions) before reading innerText.
+  function getInnerText(el) {
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll(
+      'button, svg, [role="button"], mat-icon, ' +
+      '[class*="action-bar"], [class*="toolbar"], [class*="copy-button"], ' +
+      '[data-testid*="copy"], [data-testid*="action"], [data-testid*="share"], ' +
+      '[class*="feedback"], [class*="thumbs"], [class*="vote"], ' +
+      '[class*="like"], [class*="share"], form, ' +
+      // ChatGPT specific
+      '.juice\\:flex, .juice\\:items-center, [class*="speech-button"], ' +
+      // Gemini specific
+      'div.action-area, .message-actions, .response-actions, ' +
+      // Claude specific
+      '.claude-actions, ' +
+      // Perplexity specific
+      '[class*="action-buttons"]'
+    ).forEach(n => n.remove());
+
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'fixed';
+    wrapper.style.left = '-9999px';
+    wrapper.style.top = '-9999px';
+    wrapper.style.width = '800px';
+    wrapper.style.height = 'auto';
+    wrapper.style.visibility = 'visible';
+    wrapper.style.opacity = '0';
+    wrapper.style.pointerEvents = 'none';
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    const text = (clone.innerText || clone.textContent || '').trim();
+    document.body.removeChild(wrapper);
+    return text;
+  }
+
+  // Alias extractText to getInnerText to preserve compatibility
+  function extractText(el) {
+    return getInnerText(el);
+  }
+
+  // Filter out elements that are inputs/textareas or inside the compose/input/form area or sidebar/nav
+  function filterInputArea(el) {
+    if (!el) return false;
+    const tagName = el.tagName;
+    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || el.getAttribute('contenteditable') === 'true') {
+      return false;
+    }
+    if (
+      el.closest('[data-testid="compose-input"]') || 
+      el.closest('[class*="compose"]') || 
+      el.closest('[class*="input-area"]') || 
+      el.closest('[class*="input_area"]') || 
+      el.closest('[class*="input-box"]') || 
+      el.closest('[class*="input_box"]') || 
+      el.closest('form') ||
+      el.closest('fieldset') ||
+      el.closest('footer') ||
+      el.closest('[contenteditable="true"]') ||
+      el.closest('nav') ||
+      el.closest('[role="navigation"]') ||
+      el.closest('[class*="sidebar"]') ||
+      el.closest('[class*="nav-"]') ||
+      el.closest('[class*="nav_"]') ||
+      el.closest('[id*="sidebar"]') ||
+      el.closest('[id*="navigation"]')
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  // Check that messages array has at least one of each role
+  function hasBothRoles(msgs) {
+    return msgs.some(m => m.role === 'user') && msgs.some(m => m.role === 'assistant');
+  }
+
+  // Remove duplicate consecutive messages (same role+content)
+  function deduplicate(messages) {
+    return messages.filter((msg, i) => {
+      if (i === 0) return true;
+      return !(msg.role === messages[i-1].role && msg.content === messages[i-1].content);
+    });
+  }
+
+  function filterTopLevelOnly(elements) {
+    const set = new Set(elements);
+    return elements.filter(el => {
+      let parent = el.parentElement;
+      while (parent) {
+        if (set.has(parent)) {
+          return false;
+        }
+        parent = parent.parentElement;
+      }
+      return true;
+    });
+  }
+
+  // Sort two element sets by DOM order, interleave, extract text
+  function interleaveByDomOrder(userEls, assistantEls, extractFn = getInnerText) {
+    const combinedEls = [...userEls, ...assistantEls];
+    const topLevel = filterTopLevelOnly(combinedEls);
+    
+    const all = topLevel.map(el => {
+      const isUser = userEls.includes(el);
+      return { el, role: isUser ? 'user' : 'assistant' };
+    });
+    
+    all.sort((a, b) => a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    return all
+      .map(({ el, role }) => ({ role, content: extractFn(el) }))
+      .filter(m => m.content.length > 5);
+  }
+
+  // Universal fallback: walk text blocks in DOM order, alternate roles
+  function universalFallback(containerSelector, minLen = 20) {
+    const messages = [];
+    const blocks = document.querySelectorAll(containerSelector);
+    let lastRole = null;
+    blocks.forEach(el => {
+      const text = getInnerText(el);
+      if (text.length < minLen) return;
+      const role = lastRole === 'user' ? 'assistant' : 'user';
+      lastRole = role;
+      messages.push({ role, content: text });
+    });
+    return messages;
+  }
+
+  // Find the Lowest Common Ancestor (LCA) of a list of elements
+  function findLCA(elements) {
+    if (elements.length === 0) return null;
+    if (elements.length === 1) return elements[0].parentElement;
+    
+    let lca = elements[0].parentElement;
+    while (lca) {
+      const containsAll = elements.every(el => lca.contains(el));
+      if (containsAll) {
+        return lca;
+      }
+      lca = lca.parentElement;
+    }
+    return null;
+  }
+
+  // Universal LCA-based turn extractor
+  function extractConversationViaLCA(userSelectors, assistantSelectors, copyButtonSelectors) {
+    let userEls = [...document.querySelectorAll(userSelectors)].filter(filterInputArea);
+    let assistantEls = assistantSelectors ? [...document.querySelectorAll(assistantSelectors)].filter(filterInputArea) : [];
+    let copyBtns = copyButtonSelectors ? [...document.querySelectorAll(copyButtonSelectors)].filter(filterInputArea) : [];
+
+    // Exclude assistant elements that are actually inside user elements
+    assistantEls = assistantEls.filter(el => !userEls.some(userEl => userEl.contains(el)));
+
+    if (userEls.length === 0) return null;
+
+    // 1. Locate the chat container using ancestor-traversal method
+    let chatContainer = null;
+    let curr = userEls[0];
+    while (curr && curr !== document.body && curr !== document.documentElement) {
+      const parent = curr.parentElement;
+      if (!parent) break;
+      
+      // The chat container must contain all user messages
+      const containsAllUsers = userEls.every(el => parent.contains(el));
+      if (containsAllUsers) {
+        let hasUserTurn = false;
+        let hasAssistantTurn = false;
+        
+        for (const child of parent.children) {
+          const containsAnyUser = userEls.some(el => child.contains(el));
+          if (containsAnyUser) {
+            hasUserTurn = true;
+          } else {
+            const text = getInnerText(child);
+            if (text.length > 20) {
+              hasAssistantTurn = true;
+            }
+          }
+        }
+        
+        if (hasUserTurn && hasAssistantTurn) {
+          chatContainer = parent;
+          break;
+        }
+      }
+      curr = parent;
+    }
+
+    // Fallback if no container with both turns is found
+    if (!chatContainer) {
+      const allIndicators = [...userEls, ...assistantEls, ...copyBtns];
+      chatContainer = findLCA(allIndicators);
+    }
+
+    if (!chatContainer || chatContainer === document.body || chatContainer === document.documentElement) return null;
+
+    // Walk down single-child wrappers to get to the direct container of message turns
+    while (chatContainer && chatContainer.children.length === 1 && !userEls.some(el => chatContainer === el)) {
+      chatContainer = chatContainer.children[0];
+    }
+
+    const userTurns = new Set();
+    const assistantTurns = new Set();
+
+    userEls.forEach(el => {
+      let curr = el;
+      while (curr && curr.parentElement !== chatContainer) {
+        curr = curr.parentElement;
+      }
+      if (curr) userTurns.add(curr);
+    });
+
+    assistantEls.forEach(el => {
+      let curr = el;
+      while (curr && curr.parentElement !== chatContainer) {
+        curr = curr.parentElement;
+      }
+      if (curr) assistantTurns.add(curr);
+    });
+
+    copyBtns.forEach(btn => {
+      let curr = btn;
+      while (curr && curr.parentElement !== chatContainer) {
+        curr = curr.parentElement;
+      }
+      if (curr) assistantTurns.add(curr);
+    });
+
+    const messages = [];
+    let lastRole = null;
+
+    for (const child of chatContainer.children) {
+      const isUser = userTurns.has(child);
+      const isAssistant = assistantTurns.has(child);
+
+      let role = null;
+      if (isUser && !isAssistant) {
+        role = 'user';
+      } else if (isAssistant && !isUser) {
+        role = 'assistant';
+      } else if (isUser && isAssistant) {
+        role = 'assistant';
+      } else {
+        // Fallback for elements without explicit indicators
+        const text = getInnerText(child);
+        if (text.length > 10) {
+          role = lastRole === 'user' ? 'assistant' : 'user';
+        }
+      }
+
+      if (role) {
+        const text = getInnerText(child);
+        if (text.length > 0) {
+          if (role === 'assistant' && text.length < 10) continue;
+          messages.push({ role, content: text });
+          lastRole = role;
+        }
+      }
+    }
+
+    return messages.length > 0 ? messages : null;
+  }
+
+  const SCRAPERS = {
+
+    claude() {
+      const claudeTitle = () =>
+        document.title.replace(/[-–|]?\s*Claude.*$/i, '').trim() || 'Claude Conversation';
+
+      const userSelectors = [
+        '[data-testid="user-message"]',
+        '[data-testid="human-turn"]',
+        '[data-is-human="true"]',
+        '.font-user-message',
+        '[class*="UserMessage"]',
+        '[class*="human-turn"]',
+        '[class*="human_turn"]',
+        '[class*="user_message"]',
+        '[class*="user-message"]'
+      ].join(', ');
+
+      const assistantSelectors = [
+        '[data-testid="assistant-message"]',
+        '[data-testid="assistant-turn"]',
+        '[data-is-human="false"]',
+        '.font-claude-message',
+        '[class*="ClaudeMessage"]',
+        '[class*="assistant-message"]',
+        '[class*="assistant-turn"]',
+        '[class*="assistant_turn"]',
+        '[class*="claude_message"]',
+        '[class*="claude-message"]',
+        '[class*="ai-message"]',
+        '[class*="ai_message"]',
+        '[class*="bot-message"]',
+        '[class*="bot_message"]',
+        '.prose',
+        '[class*="prose"]',
+        '[class*="markdown"]'
+      ].join(', ');
+
+      // ── Strategy 1: LCA-based turn extractor (most robust) ──
+      const lcaMsgs = extractConversationViaLCA(
+        userSelectors,
+        assistantSelectors,
+        'button[data-testid="action-bar-copy"], button[aria-label*="Copy" i], [class*="action-bar"] button'
+      );
+      if (lcaMsgs && hasBothRoles(lcaMsgs)) {
+        return { messages: deduplicate(lcaMsgs), title: claudeTitle() };
+      }
+
+      const humanEls = [...document.querySelectorAll(userSelectors)].filter(filterInputArea);
+      let assistantEls = [...document.querySelectorAll(assistantSelectors)].filter(filterInputArea);
+
+      // Exclude assistant elements that are actually inside user elements
+      assistantEls = assistantEls.filter(el => !humanEls.some(userEl => userEl.contains(el)));
+
+      // ── Strategy 2: Interleaved selection using broad user & assistant selectors ──
+      if (humanEls.length > 0 && assistantEls.length > 0) {
+        const msgs = interleaveByDomOrder(humanEls, assistantEls, getInnerText);
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: claudeTitle() };
+        }
+      }
+
+      // ── Strategy 3: Next-sibling anchor approach (if Strategy 2 has missing roles) ──
+      const humanTurns = humanEls;
+      if (humanTurns.length > 0) {
+        const msgs = [];
+        humanTurns.forEach(humanEl => {
+          const userText = getInnerText(humanEl);
+          if (userText.length > 0) msgs.push({ role: 'user', content: userText });
+
+          let cursor = humanEl;
+          let assistantText = '';
+
+          for (let depth = 0; depth < 8 && !assistantText; depth++) {
+            let sibling = cursor.nextElementSibling;
+            while (sibling && !assistantText) {
+              const containsHumanTurn =
+                sibling.getAttribute('data-testid') === 'human-turn' ||
+                sibling.querySelector('[data-testid="human-turn"]') !== null ||
+                sibling.matches(userSelectors) ||
+                sibling.querySelector(userSelectors) !== null;
+              
+              if (containsHumanTurn) break;
+
+              const innerContent = sibling.querySelector(
+                '.prose, [class*="prose"], [class*="markdown"], ' +
+                '[class*="message-content"], [class*="response-content"], ' +
+                '[class*="claude-message"], [class*="assistant"]'
+              );
+              const text = getInnerText(innerContent || sibling);
+
+              if (text.length > 20) {
+                assistantText = text;
+              } else {
+                sibling = sibling.nextElementSibling;
+              }
+            }
+
+            cursor = cursor.parentElement;
+            if (!cursor || cursor === document.body) break;
+          }
+
+          if (assistantText.length > 0) {
+            msgs.push({ role: 'assistant', content: assistantText });
+          }
+        });
+
+        if (msgs.length > 0 && hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: claudeTitle() };
+        }
+      }
+
+      // ── Strategy 4: Alternating fallback ──
+      const fallback = universalFallback(
+        '[class*="prose"] > p, [class*="prose"] > ul, [class*="prose"] > ol, ' +
+        '[class*="prose"] > pre, [class*="prose"] > blockquote',
+        10
+      );
+      return { messages: deduplicate(fallback), title: claudeTitle() };
+    },
+
+    chatgpt() {
+      const chatTitle = () =>
+        document.title.replace(/[-–|]?\s*ChatGPT.*$/i, '').trim() || 'ChatGPT Conversation';
+
+      // ── Strategy 1: LCA-based turn extractor ──
+      const lcaMsgs = extractConversationViaLCA(
+        '[data-message-author-role="user"]',
+        '[data-message-author-role="assistant"]',
+        'button[aria-label*="Copy" i], button[data-testid*="copy" i]'
+      );
+      if (lcaMsgs && hasBothRoles(lcaMsgs)) {
+        return { messages: deduplicate(lcaMsgs), title: chatTitle() };
+      }
+
+      // ── Strategy 2: data-message-author-role (most reliable) ──
+      const roleEls = [...document.querySelectorAll('[data-message-author-role]')].filter(filterInputArea);
+      if (roleEls.length > 0) {
+        const msgs = roleEls.map(el => {
+          const role = el.getAttribute('data-message-author-role'); // 'user' or 'assistant'
+          // Prefer the inner prose/markdown div; fall back to the whole element
+          const inner = el.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || el;
+          return { role, content: getInnerText(inner) };
+        }).filter(m => m.content.length > 3);
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: chatTitle() };
+        }
+      }
+
+      // ── Strategy 3: articles with embedded role attribute ──
+      const articles = [...document.querySelectorAll('article')].filter(filterInputArea);
+      if (articles.length > 0) {
+        const msgs = articles.flatMap(art => {
+          const roleEl = art.querySelector('[data-message-author-role]');
+          if (!roleEl) return [];
+          const role = roleEl.getAttribute('data-message-author-role');
+          const content = getInnerText(art);
+          return content.length > 5 ? [{ role, content }] : [];
+        });
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: chatTitle() };
+        }
+      }
+
+      // ── Strategy 4: Alternating fallback ──
+      return { messages: deduplicate(universalFallback('main > div > div > div', 20)), title: chatTitle() };
+    },
+
+    gemini() {
+      const gemTitle = () =>
+        document.title.replace(/[-–|]?\s*Gemini.*$/i, '').trim() || 'Gemini Conversation';
+
+      // ── Strategy 1: LCA-based turn extractor ──
+      const lcaMsgs = extractConversationViaLCA(
+        'user-query, [class*="user-query"]',
+        'model-response, [class*="model-response"], [class*="response-container"]',
+        'button[aria-label*="Copy" i], button[mattooltip*="Copy" i], [class*="copy"] button'
+      );
+      if (lcaMsgs && hasBothRoles(lcaMsgs)) {
+        return { messages: deduplicate(lcaMsgs), title: gemTitle() };
+      }
+
+      // ── Strategy 2: custom element tags <user-query> / <model-response> ──
+      const userEls  = [...document.querySelectorAll('user-query')].filter(filterInputArea);
+      const modelEls = [...document.querySelectorAll('model-response')].filter(filterInputArea);
+      if (userEls.length > 0 && modelEls.length > 0) {
+        const msgs = interleaveByDomOrder(userEls, modelEls, getInnerText);
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: gemTitle() };
+        }
+      }
+
+      // ── Strategy 3: class-name selectors ──
+      const userByClass  = [...document.querySelectorAll('[class*="user-query"], [class*="UserQuery"]')].filter(filterInputArea);
+      const modelByClass = [...document.querySelectorAll(
+        '[class*="model-response"], [class*="ModelResponse"], [class*="response-container"]'
+      )].filter(filterInputArea);
+      if (userByClass.length > 0 && modelByClass.length > 0) {
+        const msgs = interleaveByDomOrder(userByClass, modelByClass, getInnerText);
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: gemTitle() };
+        }
+      }
+
+      // ── Strategy 4: Alternating container fallback ──
+      return {
+        messages: deduplicate(universalFallback('chat-window > div, [class*="conversation"] > div', 15)),
+        title: gemTitle()
+      };
+    },
+
+    grok() {
+      const grokTitle = () =>
+        document.title.replace(/[-–|]?\s*Grok.*$/i, '').trim() || 'Grok Conversation';
+
+      // ── Strategy 1: LCA-based turn extractor ──
+      const lcaMsgs = extractConversationViaLCA(
+        '[data-role="user"], [data-message-role="user"], [class*="UserMessage"]',
+        '[data-role="assistant"], [data-message-role="assistant"], [class*="BotMessage"], [class*="AiMessage"]',
+        'button[aria-label*="Copy" i], [class*="copy"] button'
+      );
+      if (lcaMsgs && hasBothRoles(lcaMsgs)) {
+        return { messages: deduplicate(lcaMsgs), title: grokTitle() };
+      }
+
+      // ── Strategy 2: data-role / data-message-role attribute ──
+      const roleEls = [...document.querySelectorAll('[data-role], [data-message-role]')].filter(filterInputArea);
+      if (roleEls.length > 0) {
+        const msgs = roleEls.map(el => ({
+          role: (el.getAttribute('data-role') || el.getAttribute('data-message-role')) === 'user' ? 'user' : 'assistant',
+          content: getInnerText(el),
+        })).filter(m => m.content.length > 5);
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: grokTitle() };
+        }
+      }
+
+      // ── Strategy 3: class-name user vs AI containers ──
+      const userBlocks = [...document.querySelectorAll(
+        '[class*="UserMessage"], [class*="user-message"], [class*="HumanMessage"], [class*="human-message"]'
+      )].filter(filterInputArea);
+      const aiBlocks = [...document.querySelectorAll(
+        '[class*="BotMessage"], [class*="bot-message"], [class*="AiMessage"], [class*="ai-message"], ' +
+        '[class*="AssistantMessage"], [class*="assistant-message"], [class*="GrokMessage"], [class*="grok-message"]'
+      )].filter(filterInputArea);
+      if (userBlocks.length > 0 && aiBlocks.length > 0) {
+        const msgs = interleaveByDomOrder(userBlocks, aiBlocks, getInnerText);
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: grokTitle() };
+        }
+      }
+
+      // ── Strategy 4: Alternating fallback ──
+      return {
+        messages: deduplicate(universalFallback('[class*="message"], [class*="Message"]', 10)),
+        title: grokTitle()
+      };
+    },
+
+    perplexity() {
+      const pxTitle = () =>
+        document.title.replace(/[-–|]?\s*Perplexity.*$/i, '').trim() || 'Perplexity Conversation';
+
+      // ── Strategy 1: LCA-based turn extractor ──
+      const lcaMsgs = extractConversationViaLCA(
+        '[data-testid="query"], [class*="query"], h2, h3',
+        '[class*="prose"], [class*="answer"], [class*="markdown"]',
+        'button[aria-label*="Copy" i], [class*="copy"] button'
+      );
+      if (lcaMsgs && hasBothRoles(lcaMsgs)) {
+        return { messages: deduplicate(lcaMsgs), title: pxTitle() };
+      }
+
+      // ── Strategy 2: Thread-item containers with query + answer inside ──
+      const threadItems = [...document.querySelectorAll(
+        '[class*="ThreadItem"], [class*="thread-item"], [class*="AnswerItem"], [class*="answer-item"]'
+      )].filter(filterInputArea);
+      if (threadItems.length > 0) {
+        const msgs = [];
+        threadItems.forEach(item => {
+          const q = item.querySelector('[class*="query"], [class*="Query"], h2, h3');
+          const a = item.querySelector('[class*="prose"], [class*="answer"], [class*="markdown"]');
+          if (q) { const t = getInnerText(q); if (t.length > 3) msgs.push({ role: 'user', content: t }); }
+          if (a) { const t = getInnerText(a); if (t.length > 3) msgs.push({ role: 'assistant', content: t }); }
+        });
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: pxTitle() };
+        }
+      }
+
+      // ── Strategy 3: Separate query/answer element lists, zipped ──
+      const queryEls  = [...document.querySelectorAll('[data-testid*="query"], [class*="query"]:not([class*="answer"])')].filter(filterInputArea);
+      const answerEls = [...document.querySelectorAll('.prose, [class*="answer"]:not([class*="query"])')].filter(filterInputArea);
+      if (queryEls.length > 0 || answerEls.length > 0) {
+        const msgs = [];
+        const maxLen = Math.max(queryEls.length, answerEls.length);
+        for (let i = 0; i < maxLen; i++) {
+          if (queryEls[i]) { const t = getInnerText(queryEls[i]); if (t.length > 3) msgs.push({ role: 'user', content: t }); }
+          if (answerEls[i]) { const t = getInnerText(answerEls[i]); if (t.length > 3) msgs.push({ role: 'assistant', content: t }); }
+        }
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: pxTitle() };
+        }
+      }
+
+      // ── Strategy 4: section alternating fallback ──
+      return {
+        messages: deduplicate(universalFallback('section, [class*="section"]', 20)),
+        title: pxTitle()
+      };
+    },
+  };
+
+  // ════════════════════════════════════════════
+  // INJECTORS — one per platform
+  // ════════════════════════════════════════════
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  function setNativeValue(el, value) {
+    if (el.tagName === 'TEXTAREA') {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (setter) { setter.call(el, value); return; }
+    }
+    el.value = value;
+  }
+
+  function dispatchInputEvents(el) {
+    el.dispatchEvent(new Event('input',  { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function insertTextProgrammatically(el, text) {
+    el.focus();
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+      el.select();
+      const success = document.execCommand('insertText', false, text);
+      if (!success || el.value !== text) {
+        setNativeValue(el, text);
+        dispatchInputEvents(el);
+      }
+    } else {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand('selectAll', false, null);
+      const success = document.execCommand('insertText', false, text);
+      if (!success || !el.textContent.trim()) {
+        el.innerText = text;
+        dispatchInputEvents(el);
+      }
+    }
+  }
+
+  function trySubmit(inputEl, submitSelectors) {
+    const btn = document.querySelector(submitSelectors);
+    const isDisabled = btn && (btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.classList.contains('disabled'));
+    if (btn && !isDisabled) {
+      btn.click();
+    } else {
+      inputEl.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
+      }));
+    }
+  }
+
+  async function waitForElement(selectors, maxRetries = 15, interval = 700) {
+    for (let i = 0; i < maxRetries; i++) {
+      const el = document.querySelector(selectors);
+      if (el) return el;
+      await sleep(interval);
+    }
+    return null;
+  }
+
+  const INJECTORS = {
+
+    async claude(prompt) {
+      const el = await waitForElement(
+        'div.ProseMirror[contenteditable="true"], [contenteditable="true"][data-placeholder], [data-testid="compose-input"] [contenteditable]'
+      );
+      if (!el) return { success: false, error: 'Claude input not found' };
+      insertTextProgrammatically(el, prompt);
+      await sleep(1200);
+      trySubmit(el, 'button[aria-label*="Send"], button[data-testid*="send"]');
+      return { success: true };
+    },
+
+    async chatgpt(prompt) {
+      const el = await waitForElement(
+        '#prompt-textarea, div[contenteditable="true"].ProseMirror, textarea[placeholder]'
+      );
+      if (!el) return { success: false, error: 'ChatGPT input not found' };
+      insertTextProgrammatically(el, prompt);
+      await sleep(1200);
+      trySubmit(el, '[data-testid="send-button"], button[aria-label="Send message"], button[aria-label="Send prompt"]');
+      return { success: true };
+    },
+
+    async gemini(prompt) {
+      const el = await waitForElement(
+        'rich-textarea [contenteditable="true"], .ql-editor[contenteditable="true"], div[contenteditable="true"][data-placeholder]'
+      );
+      if (!el) return { success: false, error: 'Gemini input not found' };
+      insertTextProgrammatically(el, prompt);
+      await sleep(1200);
+      trySubmit(el, 'button.send-button, button[aria-label*="Send"], button[mattooltip*="Send"]');
+      return { success: true };
+    },
+
+    async grok(prompt) {
+      const el = await waitForElement(
+        'textarea[placeholder*="Ask"], textarea[placeholder*="Grok"], textarea[class*="input"], [contenteditable="true"]'
+      );
+      if (!el) return { success: false, error: 'Grok input not found' };
+      insertTextProgrammatically(el, prompt);
+      await sleep(1200);
+      trySubmit(el, 'button[aria-label*="Send"], button[type="submit"]');
+      return { success: true };
+    },
+
+    async perplexity(prompt) {
+      const el = await waitForElement(
+        'textarea[placeholder*="Ask"], textarea[placeholder*="Search"], textarea[class*="textarea"]'
+      );
+      if (!el) return { success: false, error: 'Perplexity input not found' };
+      insertTextProgrammatically(el, prompt);
+      await sleep(1200);
+      trySubmit(el, 'button[aria-label*="Submit"], button[type="submit"], button[class*="send"]');
+      return { success: true };
+    },
+  };
+
+  function runScrapeAnimation() {
+    let host = document.getElementById('__cross-context-host');
+    if (host) {
+      try { host.remove(); } catch(_) {}
+    }
+
+    host = document.createElement('div');
+    host.id = '__cross-context-host';
+    host.style.cssText = `
+      all: initial !important;
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 2147483647 !important;
+      pointer-events: auto !important;
+      display: block !important;
+      box-sizing: border-box !important;
+    `;
+    document.documentElement.appendChild(host);
+    
+    const shadow = host.attachShadow({ mode: 'open' });
+    
+    const style = document.createElement('style');
+    style.textContent = `
+      .halo-container {
+        all: initial !important;
+        position: absolute !important;
+        inset: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        z-index: 2147483647 !important;
+        pointer-events: auto !important;
+        box-sizing: border-box !important;
+        opacity: 0 !important;
+        background-color: rgba(6, 8, 12, 0.4) !important;
+        backdrop-filter: blur(0px) !important;
+        -webkit-backdrop-filter: blur(0px) !important;
+        transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                    backdrop-filter 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                    -webkit-backdrop-filter 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        border: 1.5px solid rgba(0, 149, 255, 0.3) !important;
+        will-change: opacity, backdrop-filter !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+      }
+      
+      .halo-container.agent-active {
+        opacity: 1 !important;
+        backdrop-filter: blur(4px) !important;
+        -webkit-backdrop-filter: blur(4px) !important;
+      }
+
+      .halo-container::before {
+        content: '' !important;
+        position: absolute !important;
+        inset: 0 !important;
+        box-sizing: border-box !important;
+        pointer-events: none !important;
+        box-shadow: 
+          inset 0 0 30px rgba(0, 149, 255, 0.5),
+          inset 0 0 60px rgba(0, 149, 255, 0.25) !important;
+        opacity: 0.5 !important;
+        will-change: opacity !important;
+      }
+
+      .halo-container.agent-active::before {
+        animation: cc-glow-pulse 3s infinite cubic-bezier(0.4, 0, 0.2, 1) !important;
+      }
+
+      .console-card {
+        background: rgba(10, 14, 22, 0.85) !important;
+        border: 1px solid rgba(0, 149, 255, 0.3) !important;
+        border-radius: 16px !important;
+        padding: 24px !important;
+        width: 380px !important;
+        box-shadow: 
+          0 25px 60px rgba(0, 0, 0, 0.7),
+          0 0 30px rgba(0, 149, 255, 0.15) !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+        color: #f1f5f9 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 20px !important;
+        backdrop-filter: blur(16px) !important;
+        -webkit-backdrop-filter: blur(16px) !important;
+        transform: scale(0.93) !important;
+        transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+        box-sizing: border-box !important;
+      }
+
+      .halo-container.agent-active .console-card {
+        transform: scale(1) !important;
+      }
+
+      .console-header {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+        padding-bottom: 14px !important;
+        box-sizing: border-box !important;
+      }
+
+      .console-title {
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        color: #0095FF !important;
+        letter-spacing: 1px !important;
+        font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+        text-transform: uppercase !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+      }
+
+      .console-body {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+        box-sizing: border-box !important;
+      }
+
+      .step-item {
+        display: flex !important;
+        align-items: center !important;
+        gap: 12px !important;
+        font-size: 13px !important;
+        font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+        opacity: 0.35 !important;
+        color: #94a3b8 !important;
+        transition: opacity 0.3s ease, color 0.3s ease !important;
+        box-sizing: border-box !important;
+      }
+
+      .step-item.active {
+        opacity: 1 !important;
+        color: #38bdf8 !important;
+      }
+
+      .step-item.completed {
+        opacity: 0.95 !important;
+        color: #34d399 !important;
+      }
+
+      .step-icon {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 16px !important;
+        height: 16px !important;
+        flex-shrink: 0 !important;
+      }
+
+      .spinner {
+        width: 10px !important;
+        height: 10px !important;
+        border: 2px solid rgba(0, 149, 255, 0.15) !important;
+        border-top: 2px solid #0095FF !important;
+        border-radius: 50% !important;
+        animation: cc-spin 0.8s linear infinite !important;
+      }
+
+      .dot {
+        width: 6px !important;
+        height: 6px !important;
+        background-color: rgba(255, 255, 255, 0.25) !important;
+        border-radius: 50% !important;
+      }
+
+      .check {
+        color: #34d399 !important;
+        font-weight: 700 !important;
+        font-size: 13px !important;
+      }
+
+      .agent-badge {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        background: rgba(0, 149, 255, 0.1) !important;
+        border: 1px solid rgba(0, 149, 255, 0.3) !important;
+        padding: 3px 8px !important;
+        border-radius: 12px !important;
+        color: #38bdf8 !important;
+        font-size: 9px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+        text-transform: uppercase !important;
+        box-sizing: border-box !important;
+      }
+
+      .badge-dot {
+        width: 5px !important;
+        height: 5px !important;
+        background-color: #38bdf8 !important;
+        border-radius: 50% !important;
+        box-shadow: 0 0 6px #38bdf8 !important;
+        animation: cc-dot-pulse 1.2s infinite alternate ease-in-out !important;
+      }
+
+      @keyframes cc-glow-pulse {
+        0%, 100% { opacity: 0.45 !important; }
+        50% { opacity: 0.85 !important; }
+      }
+
+      @keyframes cc-dot-pulse {
+        from { opacity: 0.4 !important; transform: scale(0.8) !important; }
+        to { opacity: 1 !important; transform: scale(1.2) !important; }
+      }
+
+      @keyframes cc-spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    `;
+    shadow.appendChild(style);
+
+    const container = document.createElement('div');
+    container.className = 'halo-container';
+    
+    const consoleCard = document.createElement('div');
+    consoleCard.className = 'console-card';
+    
+    const header = document.createElement('div');
+    header.className = 'console-header';
+    
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'console-title';
+    titleDiv.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px; animation: cc-spin 2s linear infinite;">
+        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+      </svg>
+      CROSS CONTEXT ENGINE
+    `;
+    
+    const badge = document.createElement('div');
+    badge.className = 'agent-badge';
+    
+    const dot = document.createElement('div');
+    dot.className = 'badge-dot';
+    
+    const label = document.createElement('span');
+    label.textContent = 'ACTIVE';
+    
+    badge.appendChild(dot);
+    badge.appendChild(label);
+    
+    header.appendChild(titleDiv);
+    header.appendChild(badge);
+    
+    const body = document.createElement('div');
+    body.className = 'console-body';
+    
+    const steps = [
+      'Detecting active platform...',
+      'Locating message containers...',
+      'Extracting conversation turns...',
+      'Formatting context payload...',
+      'Context captured successfully!'
+    ];
+    
+    steps.forEach((stepText, idx) => {
+      const stepDiv = document.createElement('div');
+      stepDiv.className = 'step-item';
+      stepDiv.id = `cc-step-${idx}`;
+      
+      const iconDiv = document.createElement('div');
+      iconDiv.className = 'step-icon';
+      
+      const textSpan = document.createElement('span');
+      textSpan.className = 'step-text';
+      textSpan.textContent = stepText;
+      
+      stepDiv.appendChild(iconDiv);
+      stepDiv.appendChild(textSpan);
+      body.appendChild(stepDiv);
+    });
+    
+    consoleCard.appendChild(header);
+    consoleCard.appendChild(body);
+    container.appendChild(consoleCard);
+    shadow.appendChild(container);
+
+    function setStepState(index, state) {
+      const stepEl = shadow.getElementById(`cc-step-${index}`);
+      if (!stepEl) return;
+      
+      const iconContainer = stepEl.querySelector('.step-icon');
+      if (!iconContainer) return;
+      
+      stepEl.classList.remove('active', 'completed');
+      
+      if (state === 'pending') {
+        iconContainer.innerHTML = '<div class="dot"></div>';
+      } else if (state === 'active') {
+        stepEl.classList.add('active');
+        iconContainer.innerHTML = '<div class="spinner"></div>';
+      } else if (state === 'completed') {
+        stepEl.classList.add('completed');
+        iconContainer.innerHTML = '<div class="check">✓</div>';
+      }
+    }
+
+    // Set initial states
+    setStepState(0, 'active');
+    setStepState(1, 'pending');
+    setStepState(2, 'pending');
+    setStepState(3, 'pending');
+    setStepState(4, 'pending');
+
+    // Trigger state change via CSS transition class
+    requestAnimationFrame(() => {
+      container.classList.add('agent-active');
+    });
+
+    let isFinished = false;
+    let timeouts = [];
+
+    // Step transitions sequence
+    timeouts.push(setTimeout(() => {
+      if (isFinished) return;
+      setStepState(0, 'completed');
+      setStepState(1, 'active');
+    }, 450));
+    
+    timeouts.push(setTimeout(() => {
+      if (isFinished) return;
+      setStepState(1, 'completed');
+      setStepState(2, 'active');
+    }, 900));
+    
+    timeouts.push(setTimeout(() => {
+      if (isFinished) return;
+      setStepState(2, 'completed');
+      setStepState(3, 'active');
+    }, 1450));
+
+    function cleanup() {
+      container.classList.remove('agent-active');
+      setTimeout(() => {
+        if (host.parentNode) {
+          host.remove();
+        }
+      }, 350);
+    }
+
+    return {
+      success: () => {
+        isFinished = true;
+        timeouts.forEach(clearTimeout);
+        // Set all to completed
+        setStepState(0, 'completed');
+        setStepState(1, 'completed');
+        setStepState(2, 'completed');
+        setStepState(3, 'completed');
+        setStepState(4, 'completed');
+        setTimeout(cleanup, 600);
+      },
+      fail: (errorMsg) => {
+        isFinished = true;
+        timeouts.forEach(clearTimeout);
+        
+        // Find first step that isn't completed and mark as failed
+        for (let i = 0; i < 5; i++) {
+          const stepEl = shadow.getElementById(`cc-step-${i}`);
+          if (stepEl && !stepEl.classList.contains('completed')) {
+            stepEl.classList.add('active');
+            stepEl.style.color = '#ef4444';
+            const icon = stepEl.querySelector('.step-icon');
+            if (icon) {
+              icon.innerHTML = '<span style="color: #ef4444; font-weight: bold; font-size: 13px;">✗</span>';
+            }
+            const text = stepEl.querySelector('.step-text');
+            if (text) {
+              text.textContent = `${text.textContent.replace('...', '')} failed: ${errorMsg}`;
+            }
+            break;
+          }
+        }
+        setTimeout(cleanup, 2500);
+      }
+    };
+  }
+
+  // ════════════════════════════════════════════
+  // FORMATTER — inline (no import needed)
+  // ════════════════════════════════════════════
+
+  const PLATFORM_NAMES = {
+    claude:     'Claude (Anthropic)',
+    chatgpt:    'ChatGPT (OpenAI)',
+    gemini:     'Gemini (Google)',
+    grok:       'Grok (xAI)',
+    perplexity: 'Perplexity AI',
+  };
+
+  function formatContextPrompt(context, targetPlatform) {
+    const MAX_TURNS  = 40;
+    const CHAR_LIMIT = 80000;
+
+    let msgs = [...context.messages];
+    let truncated = false;
+
+    if (msgs.length > MAX_TURNS) {
+      msgs = msgs.slice(msgs.length - MAX_TURNS);
+      truncated = true;
+    }
+
+    let transcript = '';
+    let chars = 0;
+
+    for (const msg of msgs) {
+      const label = msg.role === 'user' ? '👤 User' : '🤖 Assistant';
+      const line  = `${label}:\n${msg.content}\n\n`;
+      if (chars + line.length > CHAR_LIMIT) { truncated = true; break; }
+      transcript += line;
+      chars += line.length;
+    }
+
+    const src = PLATFORM_NAMES[context.platform] || context.platform;
+    const note = truncated ? `\n⚠️ Note: Partial history (last ${MAX_TURNS} turns shown due to length).\n` : '';
+    const div  = '═'.repeat(60);
+
+    return `[🔄 Cross Context Transfer]
+You are continuing a conversation that was started on ${src}.
+The user reached the free-tier limit there and needs your help to continue seamlessly.${note}
+Please read the conversation history below, then acknowledge you understand the context and are ready to help. Do NOT re-introduce yourself — just confirm you have the context.
+
+${div}
+📋 Conversation History (${msgs.length} messages from ${src})
+${div}
+
+${transcript.trim()}
+
+${div}
+✅ End of conversation history from ${src}
+${div}
+
+Please confirm you have the full context above and are ready to continue the conversation.`;
+  }
+
+  // ════════════════════════════════════════════
+  // PAGE-LEVEL DRAG & DROP — drop context onto this LLM page
+  // ════════════════════════════════════════════
+
+  let dropOverlayHost = null;
+  let dropOverlayShadow = null;
+  let dragEnterCount = 0; // counter to handle child dragenter/dragleave
+
+  const PLATFORM_COLORS = {
+    claude:     { primary: '#d97752', glow: 'rgba(217, 119, 82, 0.35)', bg: 'rgba(217, 119, 82, 0.06)' },
+    chatgpt:    { primary: '#10b981', glow: 'rgba(16, 185, 129, 0.35)',  bg: 'rgba(16, 185, 129, 0.06)' },
+    gemini:     { primary: '#3b82f6', glow: 'rgba(59, 130, 246, 0.35)',  bg: 'rgba(59, 130, 246, 0.06)' },
+    grok:       { primary: '#f4f4f5', glow: 'rgba(244, 244, 245, 0.25)', bg: 'rgba(244, 244, 245, 0.04)' },
+    perplexity: { primary: '#0ea5e9', glow: 'rgba(14, 165, 233, 0.35)',  bg: 'rgba(14, 165, 233, 0.06)' },
+  };
+
+  // Platform icon SVGs (small)
+  function getDropOverlayIcon(platformKey) {
+    const icons = {
+      claude: `<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></svg>`,
+      chatgpt: `<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>`,
+      gemini: `<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z"/></svg>`,
+      grok: `<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"/></svg>`,
+      perplexity: `<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M19.785 0v7.272H22.5V17.62h-2.935V24l-7.037-6.194v6.145h-1.091v-6.152L4.392 24v-6.465H1.5V7.188h2.884V0l7.053 6.494V.19h1.09v6.49L19.786 0zm-7.257 9.044v7.319l5.946 5.234V14.44l-5.946-5.397zm-1.099-.08l-5.946 5.398v7.235l5.946-5.234V8.965zm8.136 7.58h1.844V8.349H13.46l6.105 5.54v2.655zm-8.982-8.28H2.59v8.195h1.8v-2.576l6.192-5.62zM5.475 2.476v4.71h5.115l-5.115-4.71zm13.219 0l-5.115 4.71h5.115v-4.71z"/></svg>`,
+    };
+    return icons[platformKey] || `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+  }
+
+  function createDropOverlay(srcPlatform) {
+    // Remove existing overlay
+    removeDropOverlay();
+
+    const colors = PLATFORM_COLORS[srcPlatform] || { primary: '#00F2FE', glow: 'rgba(0,242,254,0.3)', bg: 'rgba(0,242,254,0.05)' };
+    const currentColors = PLATFORM_COLORS[platform] || { primary: '#00F2FE', glow: 'rgba(0,242,254,0.3)', bg: 'rgba(0,242,254,0.05)' };
+
+    dropOverlayHost = document.createElement('div');
+    dropOverlayHost.id = '__cross-context-drop-host';
+    dropOverlayHost.style.cssText = `
+      all: initial !important;
+      position: fixed !important;
+      top: 0 !important; left: 0 !important;
+      width: 100vw !important; height: 100vh !important;
+      z-index: 2147483647 !important;
+      pointer-events: none !important;
+      display: block !important;
+    `;
+    document.documentElement.appendChild(dropOverlayHost);
+
+    dropOverlayShadow = dropOverlayHost.attachShadow({ mode: 'open' });
+
+    const style = document.createElement('style');
+    style.textContent = `
+      :host { all: initial; }
+
+      .drop-overlay {
+        position: fixed !important;
+        inset: 0 !important;
+        background: rgba(6, 8, 12, 0.72) !important;
+        backdrop-filter: blur(6px) !important;
+        -webkit-backdrop-filter: blur(6px) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        opacity: 0 !important;
+        transition: opacity 0.2s ease !important;
+        pointer-events: none !important;
+        border: 3px solid transparent !important;
+        box-sizing: border-box !important;
+      }
+
+      .drop-overlay.visible {
+        opacity: 1 !important;
+        border-color: ${colors.primary} !important;
+        box-shadow: inset 0 0 60px ${colors.glow}, 0 0 0 3px ${colors.glow} !important;
+        animation: border-pulse 1.8s ease-in-out infinite !important;
+      }
+
+      .drop-overlay.over {
+        border-color: ${currentColors.primary} !important;
+        box-shadow: inset 0 0 80px ${currentColors.glow}, 0 0 0 3px ${currentColors.glow} !important;
+        animation: none !important;
+      }
+
+      @keyframes border-pulse {
+        0%, 100% { box-shadow: inset 0 0 40px ${colors.glow}, 0 0 0 2px ${colors.glow}; }
+        50%       { box-shadow: inset 0 0 80px ${colors.glow}, 0 0 0 4px ${colors.glow}; }
+      }
+
+      .drop-card {
+        background: rgba(10, 14, 22, 0.9) !important;
+        border: 1.5px solid ${colors.primary}40 !important;
+        border-radius: 20px !important;
+        padding: 36px 44px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        gap: 16px !important;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.8), 0 0 40px ${colors.glow} !important;
+        transform: scale(0.9) !important;
+        transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.2s !important;
+        pointer-events: none !important;
+        backdrop-filter: blur(20px) !important;
+        -webkit-backdrop-filter: blur(20px) !important;
+        text-align: center !important;
+        max-width: 360px !important;
+      }
+
+      .drop-overlay.visible .drop-card {
+        transform: scale(1) !important;
+      }
+
+      .drop-overlay.over .drop-card {
+        transform: scale(1.04) !important;
+        border-color: ${currentColors.primary}80 !important;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.8), 0 0 60px ${currentColors.glow} !important;
+      }
+
+      .drop-icon {
+        width: 64px !important;
+        height: 64px !important;
+        border-radius: 18px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background: ${colors.bg} !important;
+        border: 1.5px solid ${colors.primary}40 !important;
+        color: ${colors.primary} !important;
+        flex-shrink: 0 !important;
+        animation: icon-bob 2s ease-in-out infinite !important;
+      }
+
+      @keyframes icon-bob {
+        0%, 100% { transform: translateY(0); }
+        50%       { transform: translateY(-5px); }
+      }
+
+      .drop-overlay.over .drop-icon {
+        animation: none !important;
+        transform: scale(1.1) !important;
+        background: ${currentColors.bg} !important;
+        border-color: ${currentColors.primary}60 !important;
+        color: ${currentColors.primary} !important;
+      }
+
+      .drop-title {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+        font-size: 18px !important;
+        font-weight: 700 !important;
+        color: #f4f4f5 !important;
+        letter-spacing: -0.3px !important;
+        margin: 0 !important;
+      }
+
+      .drop-subtitle {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+        font-size: 13px !important;
+        color: rgba(161, 161, 170, 0.9) !important;
+        margin: 0 !important;
+        line-height: 1.5 !important;
+      }
+
+      .drop-subtitle strong {
+        color: ${colors.primary} !important;
+        font-weight: 600 !important;
+      }
+
+      .drop-arrow {
+        color: rgba(161,161,170,0.5) !important;
+        animation: arrow-bounce 1s ease-in-out infinite alternate !important;
+      }
+
+      @keyframes arrow-bounce {
+        from { transform: translateY(-3px); opacity: 0.4; }
+        to   { transform: translateY(3px);  opacity: 0.9; }
+      }
+
+      /* Injecting state */
+      .drop-overlay.injecting .drop-card {
+        transform: scale(1) !important;
+        border-color: #0095FF40 !important;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(0,149,255,0.3) !important;
+      }
+
+      .drop-overlay.injecting .drop-icon {
+        animation: spin-icon 0.8s linear infinite !important;
+        background: rgba(0,149,255,0.08) !important;
+        border-color: #0095FF60 !important;
+        color: #38bdf8 !important;
+      }
+
+      @keyframes spin-icon {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+
+      .drop-overlay.injecting .drop-title { color: #38bdf8 !important; }
+
+      /* Success state */
+      .drop-overlay.success .drop-card {
+        border-color: #10b98140 !important;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.8), 0 0 60px rgba(16,185,129,0.3) !important;
+      }
+
+      .drop-overlay.success .drop-icon {
+        animation: none !important;
+        background: rgba(16,185,129,0.08) !important;
+        border-color: #10b98160 !important;
+        color: #34d399 !important;
+        transform: scale(1) !important;
+      }
+
+      .drop-overlay.success .drop-title { color: #34d399 !important; }
+
+      /* Error state */
+      .drop-overlay.error-state .drop-icon {
+        animation: none !important;
+        background: rgba(239,68,68,0.08) !important;
+        border-color: #ef444460 !important;
+        color: #f87171 !important;
+      }
+
+      .drop-overlay.error-state .drop-title { color: #f87171 !important; }
+    `;
+    dropOverlayShadow.appendChild(style);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drop-overlay';
+    overlay.id = 'cc-drop-overlay';
+
+    const card = document.createElement('div');
+    card.className = 'drop-card';
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'drop-icon';
+    iconEl.id = 'cc-drop-icon';
+    iconEl.innerHTML = getDropOverlayIcon(srcPlatform);
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'drop-title';
+    titleEl.id = 'cc-drop-title';
+    titleEl.textContent = 'Drop to inject context';
+
+    const subtitleEl = document.createElement('div');
+    subtitleEl.className = 'drop-subtitle';
+    subtitleEl.id = 'cc-drop-subtitle';
+    subtitleEl.innerHTML = `Conversation from <strong>${PLATFORM_NAMES[srcPlatform] || srcPlatform}</strong> will be injected<br>and submitted to this chat.`;
+
+    const arrowEl = document.createElement('div');
+    arrowEl.className = 'drop-arrow';
+    arrowEl.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`;
+
+    card.appendChild(iconEl);
+    card.appendChild(titleEl);
+    card.appendChild(subtitleEl);
+    card.appendChild(arrowEl);
+    overlay.appendChild(card);
+    dropOverlayShadow.appendChild(overlay);
+
+    // Trigger entrance animation
+    requestAnimationFrame(() => {
+      overlay.classList.add('visible');
+    });
+
+    return { overlay, iconEl, titleEl, subtitleEl, arrowEl };
+  }
+
+  function removeDropOverlay() {
+    if (dropOverlayHost) {
+      try { dropOverlayHost.remove(); } catch (_) {}
+      dropOverlayHost = null;
+      dropOverlayShadow = null;
+    }
+    dragEnterCount = 0;
+  }
+
+  function getOverlayEl() {
+    if (!dropOverlayShadow) return null;
+    return dropOverlayShadow.getElementById('cc-drop-overlay');
+  }
+
+  // Spinner SVG for injecting state
+  const SPINNER_SVG = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>`;
+  const CHECK_SVG   = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+  const ERROR_SVG   = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+
+  // Track whether a Cross Context drag is in flight (set via storage.onChanged or MIME types)
+  let ccDragActive = false;
+  let ccDragPlatform = null;
+
+  function checkCrossContextDrag(e) {
+    if (ccDragActive) return true;
+    if (e.dataTransfer && e.dataTransfer.types) {
+      const types = Array.from(e.dataTransfer.types);
+      const isCc = types.includes('text/x-cross-context') || types.includes('text/x-cross-context-active');
+      const sourceMime = types.find(t => typeof t === 'string' && t.startsWith('text/x-cross-context-source-'));
+      if (isCc || sourceMime) {
+        ccDragActive = true;
+        if (sourceMime) {
+          ccDragPlatform = sourceMime.split('text/x-cross-context-source-')[1];
+        } else {
+          ccDragPlatform = platform;
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Listen for pendingDrop being written by the popup at dragstart.
+  // This fires on the content script side as soon as the popup sets it,
+  // giving us a synchronous flag we can check inside dragenter/dragover.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+
+    if (changes.pendingDrop) {
+      const newVal = changes.pendingDrop.newValue;
+      if (newVal && Date.now() - newVal.timestamp < 30000) {
+        // Popup just started a drag — arm the drop zone
+        ccDragActive = true;
+        ccDragPlatform = newVal.platform || platform;
+      } else {
+        // pendingDrop was removed (drag cancelled or completed)
+        ccDragActive = false;
+        ccDragPlatform = null;
+      }
+    }
+  });
+
+  window.addEventListener('dragenter', (e) => {
+    if (!checkCrossContextDrag(e)) return;
+    dragEnterCount++;
+    if (dragEnterCount === 1 && !dropOverlayHost) {
+      createDropOverlay(ccDragPlatform || platform);
+    }
+    e.preventDefault();
+  }, true);
+
+  window.addEventListener('dragover', (e) => {
+    if (!checkCrossContextDrag(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    
+    // Recovery if dragenter didn't create the overlay
+    if (!dropOverlayHost) {
+      dragEnterCount = 1;
+      createDropOverlay(ccDragPlatform || platform);
+    }
+    
+    const ol = getOverlayEl();
+    if (ol && !ol.classList.contains('over')) ol.classList.add('over');
+  }, true);
+
+  window.addEventListener('dragleave', (e) => {
+    if (!dropOverlayHost) return;
+    dragEnterCount = Math.max(0, dragEnterCount - 1);
+    if (dragEnterCount === 0) {
+      const ol = getOverlayEl();
+      if (ol) {
+        ol.classList.remove('over', 'visible');
+        setTimeout(removeDropOverlay, 180);
+      }
+    }
+  }, true);
+
+  window.addEventListener('drop', async (e) => {
+    if (!dropOverlayHost) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    dragEnterCount = 0;
+    ccDragActive = false;
+
+    const ol = getOverlayEl();
+    const iconEl  = dropOverlayShadow?.getElementById('cc-drop-icon');
+    const titleEl = dropOverlayShadow?.getElementById('cc-drop-title');
+    const subEl   = dropOverlayShadow?.getElementById('cc-drop-subtitle');
+
+    // Move to injecting state immediately (visible to user)
+    if (ol)    { ol.classList.remove('over'); ol.classList.add('injecting'); }
+    if (iconEl)  iconEl.innerHTML  = SPINNER_SVG;
+    if (titleEl) titleEl.textContent = 'Injecting...';
+    if (subEl)   subEl.textContent   = 'Reading conversation…';
+
+    let contextId = null;
+    let plainText = null;
+
+    // 1) Try dataTransfer (works if popup is still open — rare but possible)
+    try {
+      const raw = e.dataTransfer?.getData('text/x-cross-context');
+      if (raw) contextId = JSON.parse(raw).id;
+    } catch (_) {}
+
+    try {
+      plainText = e.dataTransfer?.getData('text/plain') || null;
+      if (!contextId && plainText && !plainText.includes('[🔄 Cross Context Transfer]')) {
+        contextId = plainText.trim();
+      }
+    } catch (_) {}
+
+    // 2) Always prefer storage — popup is almost certainly closed by now
+    try {
+      const { pendingDrop } = await chrome.storage.local.get('pendingDrop');
+      if (pendingDrop?.id && Date.now() - pendingDrop.timestamp < 30000) {
+        contextId = pendingDrop.id;
+      }
+    } catch (_) {}
+
+    const hasFallbackText = plainText && plainText.includes('[🔄 Cross Context Transfer]');
+    if (!contextId && !hasFallbackText) {
+      if (ol) ol.classList.add('error-state');
+      if (iconEl)  iconEl.innerHTML  = ERROR_SVG;
+      if (titleEl) titleEl.textContent = 'Drop failed';
+      if (subEl)   subEl.textContent   = 'Could not find context ID or fallback payload.';
+      setTimeout(removeDropOverlay, 2500);
+      return;
+    }
+
+    try {
+      // Clear pendingDrop from storage now that we have the ID
+      if (contextId) {
+        chrome.storage.local.remove('pendingDrop');
+      }
+
+      let formatted = '';
+      let srcPlatform = ccDragPlatform || platform;
+
+      if (contextId) {
+        if (subEl) subEl.textContent = 'Loading context from storage…';
+        const { contexts = [] } = await chrome.storage.local.get('contexts');
+        const context = contexts.find(c => c.id === contextId);
+        if (context) {
+          srcPlatform = context.platform;
+          formatted = formatContextPrompt(context, platform);
+        } else if (hasFallbackText) {
+          formatted = plainText;
+        } else {
+          throw new Error('Context not found — it may have been deleted.');
+        }
+      } else {
+        formatted = plainText;
+      }
+
+      // Update icon to actual source platform
+      if (iconEl && srcPlatform) iconEl.innerHTML = getDropOverlayIcon(srcPlatform);
+      if (subEl) subEl.textContent = 'Filling input field…';
+
+      // Check we have an injector
+      const injector = INJECTORS[platform];
+      if (!injector) throw new Error(`No injector for "${platform}". Is this an LLM page?`);
+
+      // Format and inject
+      const result = await injector(formatted);
+      if (!result?.success) throw new Error(result?.error || 'Injection returned failure.');
+
+      // ✅ Success
+      if (ol) { ol.classList.remove('injecting'); ol.classList.add('success'); }
+      if (iconEl)  iconEl.innerHTML  = CHECK_SVG;
+      if (titleEl) titleEl.textContent = 'Context injected!';
+      if (subEl) {
+        const srcName = PLATFORM_NAMES[srcPlatform] || srcPlatform;
+        subEl.innerHTML = `From <strong style="color:#34d399">${srcName}</strong> — submitted to this chat.`;
+      }
+      setTimeout(removeDropOverlay, 2000);
+
+    } catch (err) {
+      if (ol) { ol.classList.remove('injecting'); ol.classList.add('error-state'); }
+      if (iconEl)  iconEl.innerHTML  = ERROR_SVG;
+      if (titleEl) titleEl.textContent = 'Injection failed';
+      if (subEl)   subEl.textContent   = err.message || 'An unexpected error occurred.';
+      setTimeout(removeDropOverlay, 3500);
+    }
+  }, true);
+
+
+
+  // ════════════════════════════════════════════
+  // MESSAGE LISTENER
+  // ════════════════════════════════════════════
+
+  // Store reference so it can be removed on re-injection (extension reload)
+  window.__crossContextListener = (message, sender, sendResponse) => {
+    if (message.type === 'DO_SCRAPE') {
+      const anim = runScrapeAnimation();
+      (async () => {
+        try {
+          const scraper = SCRAPERS[platform];
+          if (!scraper) {
+            anim.fail('Unsupported platform');
+            sendResponse({ success: false, error: `No scraper for platform: ${platform}` });
+            return;
+          }
+          const { messages, title } = scraper();
+          if (!messages || messages.length === 0) {
+            anim.fail('No messages found');
+            sendResponse({ success: false, error: 'No conversation found. Make sure you have an active conversation open on this page.' });
+            return;
+          }
+          
+          // Wait 2 seconds to slow down the scraping feel and let the user appreciate the animation
+          await sleep(2000);
+
+          anim.success();
+          sendResponse({
+            success: true,
+            context: { platform, title, messages, url: window.location.href }
+          });
+        } catch (err) {
+          anim.fail(err.message || 'Scrape failed');
+          sendResponse({ success: false, error: 'Scrape error: ' + err.message });
+        }
+      })();
+      return true;
+    }
+
+    if (message.type === 'DO_INJECT') {
+      const injector = INJECTORS[message.targetPlatform];
+      if (!injector) {
+        sendResponse({ success: false, error: `No injector for: ${message.targetPlatform}` });
+        return true;
+      }
+      const formatted = formatContextPrompt(message.context, message.targetPlatform);
+      injector(formatted).then(result => {
+        chrome.storage.local.remove('pendingInjection');
+        sendResponse(result);
+      }).catch(err => {
+        sendResponse({ success: false, error: err.message });
+      });
+      return true;
+    }
+
+    if (message.type === 'ARM_DROP') {
+      // Popup is starting a drag — pre-arm our drop detection
+      const { id, platform: srcPlatform, timestamp } = message.payload || {};
+      if (id && Date.now() - (timestamp || 0) < 30000) {
+        ccDragActive = true;
+        ccDragPlatform = srcPlatform || platform;
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message.type === 'DISARM_DROP') {
+      // Drag was cancelled without a drop
+      if (!dropOverlayHost) {
+        ccDragActive = false;
+        ccDragPlatform = null;
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message.type === 'PING') {
+      sendResponse({ alive: true, platform });
+      return true;
+    }
+  };
+
+  chrome.runtime.onMessage.addListener(window.__crossContextListener);
+
+
+  // ════════════════════════════════════════════
+  // AUTO-INJECT CHECK (tab opened by background.js)
+  // ════════════════════════════════════════════
+
+  async function checkPendingInjection() {
+    try {
+      const { pendingInjection } = await chrome.storage.local.get('pendingInjection');
+      if (!pendingInjection) return;
+
+      const { context, targetPlatform, timestamp } = pendingInjection;
+      const isRecent = Date.now() - timestamp < 30000;
+      const isTarget = targetPlatform === platform;
+
+      if (!isRecent || !isTarget) return;
+
+      await sleep(2000); // wait for page to render
+
+      const injector = INJECTORS[targetPlatform];
+      if (!injector) return;
+
+      const formatted = formatContextPrompt(context, targetPlatform);
+      await injector(formatted);
+      await chrome.storage.local.remove('pendingInjection');
+
+    } catch (err) {
+      console.error('Cross Context: Auto-inject failed:', err);
+    }
+  }
+
+  // Run auto-inject check on page load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(checkPendingInjection, 1000));
+  } else {
+    setTimeout(checkPendingInjection, 1000);
+  }
+
+})();
