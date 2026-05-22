@@ -1,32 +1,67 @@
 // Cross Context — ChatGPT Scraper
 // Scrapes conversation from chatgpt.com
 
+let isSessionActive = false;
+let tempStyle = null;
+
+function startScrapingSession() {
+  if (isSessionActive) return;
+  isSessionActive = true;
+  if (!tempStyle) {
+    tempStyle = document.createElement('style');
+    tempStyle.id = 'cc-scrape-temp-style';
+    tempStyle.textContent = `
+      .cc-scraping-active button,
+      .cc-scraping-active svg,
+      .cc-scraping-active [role="button"],
+      .cc-scraping-active mat-icon,
+      .cc-scraping-active [class*="action-bar"],
+      .cc-scraping-active [class*="toolbar"],
+      .cc-scraping-active [class*="copy-button"],
+      .cc-scraping-active [data-testid*="copy"],
+      .cc-scraping-active [data-testid*="action"],
+      .cc-scraping-active [data-testid*="share"],
+      .cc-scraping-active [class*="feedback"],
+      .cc-scraping-active [class*="thumbs"],
+      .cc-scraping-active [class*="vote"],
+      .cc-scraping-active [class*="like"],
+      .cc-scraping-active [class*="share"],
+      .cc-scraping-active form,
+      .cc-scraping-active .juice\\:flex,
+      .cc-scraping-active .juice\\:items-center,
+      .cc-scraping-active [class*="speech-button"],
+      .cc-scraping-active div.action-area,
+      .cc-scraping-active .message-actions,
+      .cc-scraping-active .response-actions,
+      .cc-scraping-active .claude-actions,
+      .cc-scraping-active [class*="action-buttons"],
+      .cc-scraping-active [class*="citation"],
+      .cc-scraping-active [class*="source"],
+      .cc-scraping-active sup {
+        display: none !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(tempStyle);
+  }
+  document.documentElement.classList.add('cc-scraping-active');
+}
+
+function endScrapingSession() {
+  if (!isSessionActive) return;
+  isSessionActive = false;
+  document.documentElement.classList.remove('cc-scraping-active');
+  if (tempStyle) {
+    tempStyle.remove();
+    tempStyle = null;
+  }
+}
+
 function getInnerText(el) {
   if (!el) return '';
-  const clone = el.cloneNode(true);
-  clone.querySelectorAll(
-    'button, svg, [role="button"], mat-icon, ' +
-    '[class*="action-bar"], [class*="toolbar"], [class*="copy-button"], ' +
-    '[data-testid*="copy"], [data-testid*="action"], [data-testid*="share"], ' +
-    '[class*="feedback"], [class*="thumbs"], [class*="vote"], ' +
-    '[class*="like"], [class*="share"], form, ' +
-    '.juice\\:flex, .juice\\:items-center, [class*="speech-button"]'
-  ).forEach(n => n.remove());
-
-  const wrapper = document.createElement('div');
-  wrapper.style.position = 'fixed';
-  wrapper.style.left = '-9999px';
-  wrapper.style.top = '-9999px';
-  wrapper.style.width = '800px';
-  wrapper.style.height = 'auto';
-  wrapper.style.visibility = 'visible';
-  wrapper.style.opacity = '0';
-  wrapper.style.pointerEvents = 'none';
-  wrapper.appendChild(clone);
-  document.body.appendChild(wrapper);
-
-  const text = (clone.innerText || clone.textContent || '').trim();
-  document.body.removeChild(wrapper);
+  const wasActive = isSessionActive;
+  if (!wasActive) startScrapingSession();
+  const text = (el.innerText || el.textContent || '').trim();
+  if (!wasActive) endScrapingSession();
   return text;
 }
 
@@ -65,7 +100,7 @@ function filterInputArea(el) {
 }
 
 function hasBothRoles(msgs) {
-  return msgs.some(m => m.role === 'user') && msgs.some(m => m.role === 'assistant');
+  return msgs.some(m => m.role === 'user' && m.content.trim()) && msgs.some(m => m.role === 'assistant' && m.content.trim());
 }
 
 function deduplicate(messages) {
@@ -248,10 +283,94 @@ function extractConversationViaLCA(userSelectors, assistantSelectors, copyButton
 
 export function scrapeConversation() {
   try {
+    startScrapingSession();
+
     const chatTitle = () =>
       document.title.replace(/[-–|]?\s*ChatGPT.*$/i, '').trim() || 'ChatGPT Conversation';
 
-    // ── Strategy 1: LCA-based turn extractor ──
+    // ── Strategy 1: Direct data-message-author-role attribute (most reliable) ──
+    // ChatGPT tags every message container with data-message-author-role="user"|"assistant".
+    // This is the MOST accurate approach — read the role straight from the attribute.
+    const roleEls = [...document.querySelectorAll('[data-message-author-role]')].filter(filterInputArea);
+    if (roleEls.length > 0) {
+      const msgs = roleEls.map(el => {
+        const role = el.getAttribute('data-message-author-role');
+        // Only accept 'user' or 'assistant' roles — skip system/tool messages
+        if (role !== 'user' && role !== 'assistant') return null;
+        // Prefer the inner prose/markdown div for cleaner text; fall back to the whole element
+        const inner = el.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || el;
+        return { role, content: getInnerText(inner) };
+      }).filter(m => m && m.content.length > 3);
+      if (hasBothRoles(msgs)) {
+        return {
+          success: true,
+          context: {
+            platform: 'chatgpt',
+            title: chatTitle(),
+            messages: deduplicate(msgs),
+            url: window.location.href,
+          }
+        };
+      }
+    }
+
+    // ── Strategy 2: article elements with embedded role attribute ──
+    // Each ChatGPT message turn is wrapped in an <article>. Find the role indicator inside.
+    const articles = [...document.querySelectorAll('article[data-testid*="conversation-turn"]')].filter(filterInputArea);
+    if (articles.length > 0) {
+      const msgs = articles.flatMap(art => {
+        const roleEl = art.querySelector('[data-message-author-role]');
+        if (!roleEl) return [];
+        const role = roleEl.getAttribute('data-message-author-role');
+        if (role !== 'user' && role !== 'assistant') return [];
+        let textEl = roleEl;
+        if (role === 'assistant') {
+          textEl = art.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || roleEl;
+        }
+        const content = getInnerText(textEl);
+        return content.length > 3 ? [{ role, content }] : [];
+      });
+      if (hasBothRoles(msgs)) {
+        return {
+          success: true,
+          context: {
+            platform: 'chatgpt',
+            title: chatTitle(),
+            messages: deduplicate(msgs),
+            url: window.location.href,
+          }
+        };
+      }
+    }
+
+    // ── Strategy 3: Broader article fallback (no data-testid filter) ──
+    const allArticles = [...document.querySelectorAll('article')].filter(filterInputArea);
+    if (allArticles.length > 0) {
+      const msgs = allArticles.flatMap(art => {
+        const roleEl = art.querySelector('[data-message-author-role]');
+        if (!roleEl) return [];
+        const role = roleEl.getAttribute('data-message-author-role');
+        if (role !== 'user' && role !== 'assistant') return [];
+        const inner = (role === 'assistant')
+          ? (art.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || art)
+          : art;
+        const content = getInnerText(inner);
+        return content.length > 5 ? [{ role, content }] : [];
+      });
+      if (hasBothRoles(msgs)) {
+        return {
+          success: true,
+          context: {
+            platform: 'chatgpt',
+            title: chatTitle(),
+            messages: deduplicate(msgs),
+            url: window.location.href,
+          }
+        };
+      }
+    }
+
+    // ── Strategy 4: LCA-based turn extractor (fallback for changed DOM) ──
     const lcaMsgs = extractConversationViaLCA(
       '[data-message-author-role="user"]',
       '[data-message-author-role="assistant"]',
@@ -269,51 +388,7 @@ export function scrapeConversation() {
       };
     }
 
-    // ── Strategy 2: data-message-author-role (most reliable) ──
-    const roleEls = [...document.querySelectorAll('[data-message-author-role]')].filter(filterInputArea);
-    if (roleEls.length > 0) {
-      const msgs = roleEls.map(el => {
-        const role = el.getAttribute('data-message-author-role'); // 'user' or 'assistant'
-        const inner = el.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || el;
-        return { role, content: getInnerText(inner) };
-      }).filter(m => m.content.length > 3);
-      if (hasBothRoles(msgs)) {
-        return {
-          success: true,
-          context: {
-            platform: 'chatgpt',
-            title: chatTitle(),
-            messages: deduplicate(msgs),
-            url: window.location.href,
-          }
-        };
-      }
-    }
-
-    // ── Strategy 3: articles with embedded role attribute ──
-    const articles = [...document.querySelectorAll('article')].filter(filterInputArea);
-    if (articles.length > 0) {
-      const msgs = articles.flatMap(art => {
-        const roleEl = art.querySelector('[data-message-author-role]');
-        if (!roleEl) return [];
-        const role = roleEl.getAttribute('data-message-author-role');
-        const content = getInnerText(art);
-        return content.length > 5 ? [{ role, content }] : [];
-      });
-      if (hasBothRoles(msgs)) {
-        return {
-          success: true,
-          context: {
-            platform: 'chatgpt',
-            title: chatTitle(),
-            messages: deduplicate(msgs),
-            url: window.location.href,
-          }
-        };
-      }
-    }
-
-    // ── Strategy 4: Alternating fallback ──
+    // ── Strategy 5: Alternating fallback ──
     const fallback = universalFallback('main > div > div > div', 20);
     if (fallback.length === 0) {
       return { success: false, error: 'No conversation found. Make sure you have an active ChatGPT conversation open.' };
@@ -330,5 +405,7 @@ export function scrapeConversation() {
     };
   } catch (err) {
     return { success: false, error: err.message };
+  } finally {
+    endScrapingSession();
   }
 }

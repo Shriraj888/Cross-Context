@@ -49,7 +49,7 @@
 
 html, body {
   width: 380px;
-  height: 560px;
+  height: 600px;
   overflow: hidden;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 13px;
@@ -155,8 +155,8 @@ body {
 /* ── Scrollbar ────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 242, 254, 0.25); }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
 
 /* ── Header ───────────────────────────────── */
 .header {
@@ -407,7 +407,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 380px;
 }
 
 /* ── Empty State ──────────────────────────── */
@@ -444,12 +443,13 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 12px;
+  padding: 10px 12px;
   cursor: pointer;
   transition: var(--transition);
   position: relative;
   overflow: hidden;
   animation: slideIn 0.2s ease-out;
+  flex-shrink: 0;
 }
 
 @keyframes slideIn {
@@ -477,7 +477,7 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .card-platform-badge {
@@ -513,7 +513,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .card-meta-item {
@@ -527,12 +527,12 @@ body {
 .card-actions {
   display: flex;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .btn-preview {
   flex: 1;
-  padding: 6px 10px;
+  padding: 5px 8px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-secondary);
@@ -554,7 +554,7 @@ body {
 }
 
 .btn-delete-card {
-  padding: 6px 8px;
+  padding: 5px 6px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-muted);

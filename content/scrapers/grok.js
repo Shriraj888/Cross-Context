@@ -1,8 +1,74 @@
 // Cross Context — Grok Scraper
 // Scrapes conversation from grok.com
 
+let isSessionActive = false;
+let tempStyle = null;
+
+function startScrapingSession() {
+  if (isSessionActive) return;
+  isSessionActive = true;
+  if (!tempStyle) {
+    tempStyle = document.createElement('style');
+    tempStyle.id = 'cc-scrape-temp-style';
+    tempStyle.textContent = `
+      .cc-scraping-active button,
+      .cc-scraping-active svg,
+      .cc-scraping-active [role="button"],
+      .cc-scraping-active mat-icon,
+      .cc-scraping-active [class*="action-bar"],
+      .cc-scraping-active [class*="toolbar"],
+      .cc-scraping-active [class*="copy-button"],
+      .cc-scraping-active [data-testid*="copy"],
+      .cc-scraping-active [data-testid*="action"],
+      .cc-scraping-active [data-testid*="share"],
+      .cc-scraping-active [class*="feedback"],
+      .cc-scraping-active [class*="thumbs"],
+      .cc-scraping-active [class*="vote"],
+      .cc-scraping-active [class*="like"],
+      .cc-scraping-active [class*="share"],
+      .cc-scraping-active form,
+      .cc-scraping-active .juice\\:flex,
+      .cc-scraping-active .juice\\:items-center,
+      .cc-scraping-active [class*="speech-button"],
+      .cc-scraping-active div.action-area,
+      .cc-scraping-active .message-actions,
+      .cc-scraping-active .response-actions,
+      .cc-scraping-active .claude-actions,
+      .cc-scraping-active [class*="action-buttons"],
+      .cc-scraping-active [class*="citation"],
+      .cc-scraping-active [class*="source"],
+      .cc-scraping-active sup {
+        display: none !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(tempStyle);
+  }
+  document.documentElement.classList.add('cc-scraping-active');
+}
+
+function endScrapingSession() {
+  if (!isSessionActive) return;
+  isSessionActive = false;
+  document.documentElement.classList.remove('cc-scraping-active');
+  if (tempStyle) {
+    tempStyle.remove();
+    tempStyle = null;
+  }
+}
+
+function extractText(el) {
+  if (!el) return '';
+  const wasActive = isSessionActive;
+  if (!wasActive) startScrapingSession();
+  const text = (el.innerText || el.textContent || '').trim();
+  if (!wasActive) endScrapingSession();
+  return text;
+}
+
 export function scrapeConversation() {
   try {
+    startScrapingSession();
+
     const messages = [];
 
     // Grok uses a React-based structure
@@ -59,14 +125,7 @@ export function scrapeConversation() {
     };
   } catch (err) {
     return { success: false, error: err.message };
+  } finally {
+    endScrapingSession();
   }
-}
-
-function extractText(el) {
-  if (!el) return '';
-  const clone = el.cloneNode(true);
-  clone.querySelectorAll(
-    'button, svg, [role="button"], [class*="action"], [class*="toolbar"]'
-  ).forEach(n => n.remove());
-  return (clone.innerText || clone.textContent || '').trim();
 }

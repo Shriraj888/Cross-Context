@@ -1,32 +1,67 @@
 // Cross Context — Claude Scraper
 // Scrapes conversation from claude.ai
 
+let isSessionActive = false;
+let tempStyle = null;
+
+function startScrapingSession() {
+  if (isSessionActive) return;
+  isSessionActive = true;
+  if (!tempStyle) {
+    tempStyle = document.createElement('style');
+    tempStyle.id = 'cc-scrape-temp-style';
+    tempStyle.textContent = `
+      .cc-scraping-active button,
+      .cc-scraping-active svg,
+      .cc-scraping-active [role="button"],
+      .cc-scraping-active mat-icon,
+      .cc-scraping-active [class*="action-bar"],
+      .cc-scraping-active [class*="toolbar"],
+      .cc-scraping-active [class*="copy-button"],
+      .cc-scraping-active [data-testid*="copy"],
+      .cc-scraping-active [data-testid*="action"],
+      .cc-scraping-active [data-testid*="share"],
+      .cc-scraping-active [class*="feedback"],
+      .cc-scraping-active [class*="thumbs"],
+      .cc-scraping-active [class*="vote"],
+      .cc-scraping-active [class*="like"],
+      .cc-scraping-active [class*="share"],
+      .cc-scraping-active form,
+      .cc-scraping-active .juice\\:flex,
+      .cc-scraping-active .juice\\:items-center,
+      .cc-scraping-active [class*="speech-button"],
+      .cc-scraping-active div.action-area,
+      .cc-scraping-active .message-actions,
+      .cc-scraping-active .response-actions,
+      .cc-scraping-active .claude-actions,
+      .cc-scraping-active [class*="action-buttons"],
+      .cc-scraping-active [class*="citation"],
+      .cc-scraping-active [class*="source"],
+      .cc-scraping-active sup {
+        display: none !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(tempStyle);
+  }
+  document.documentElement.classList.add('cc-scraping-active');
+}
+
+function endScrapingSession() {
+  if (!isSessionActive) return;
+  isSessionActive = false;
+  document.documentElement.classList.remove('cc-scraping-active');
+  if (tempStyle) {
+    tempStyle.remove();
+    tempStyle = null;
+  }
+}
+
 function getInnerText(el) {
   if (!el) return '';
-  const clone = el.cloneNode(true);
-  clone.querySelectorAll(
-    'button, svg, [role="button"], mat-icon, ' +
-    '[class*="action-bar"], [class*="toolbar"], [class*="copy-button"], ' +
-    '[data-testid*="copy"], [data-testid*="action"], [data-testid*="share"], ' +
-    '[class*="feedback"], [class*="thumbs"], [class*="vote"], ' +
-    '[class*="like"], [class*="share"], form, ' +
-    '.claude-actions'
-  ).forEach(n => n.remove());
-
-  const wrapper = document.createElement('div');
-  wrapper.style.position = 'fixed';
-  wrapper.style.left = '-9999px';
-  wrapper.style.top = '-9999px';
-  wrapper.style.width = '800px';
-  wrapper.style.height = 'auto';
-  wrapper.style.visibility = 'visible';
-  wrapper.style.opacity = '0';
-  wrapper.style.pointerEvents = 'none';
-  wrapper.appendChild(clone);
-  document.body.appendChild(wrapper);
-
-  const text = (clone.innerText || clone.textContent || '').trim();
-  document.body.removeChild(wrapper);
+  const wasActive = isSessionActive;
+  if (!wasActive) startScrapingSession();
+  const text = (el.innerText || el.textContent || '').trim();
+  if (!wasActive) endScrapingSession();
   return text;
 }
 
@@ -65,7 +100,7 @@ function filterInputArea(el) {
 }
 
 function hasBothRoles(msgs) {
-  return msgs.some(m => m.role === 'user') && msgs.some(m => m.role === 'assistant');
+  return msgs.some(m => m.role === 'user' && m.content.trim()) && msgs.some(m => m.role === 'assistant' && m.content.trim());
 }
 
 function deduplicate(messages) {
@@ -234,6 +269,8 @@ function extractConversationViaLCA(userSelectors, assistantSelectors, copyButton
 
 export function scrapeConversation() {
   try {
+    startScrapingSession();
+
     const claudeTitle = () =>
       document.title.replace(/[-–|]?\s*Claude.*$/i, '').trim() || 'Claude Conversation';
 
@@ -398,5 +435,7 @@ export function scrapeConversation() {
     };
   } catch (err) {
     return { success: false, error: err.message };
+  } finally {
+    endScrapingSession();
   }
 }
