@@ -193,7 +193,7 @@ async function detectCurrentTab() {
         const cfg = PLATFORMS[key];
         currentPlatformLabel.textContent = `${cfg.name} active`;
         platformDot.className = `platform-dot active dot-${key}`;
-        platformDot.innerHTML = getPlatformIcon(key, 14);
+        platformDot.innerHTML = getPlatformIcon(key, 18);
         platformDot.style.color = getComputedStyle(document.documentElement)
           .getPropertyValue(`--${key}`) || '#3b82f6';
         

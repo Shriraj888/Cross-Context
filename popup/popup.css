@@ -413,14 +413,14 @@ body {
 }
 
 .platform-dot.active {
-  width: 18px;
-  height: 18px;
-  border: 1px solid currentColor;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
 }
 
 .platform-dot.active::after {
-  opacity: 0.15;
-  transform: scale(1);
+  display: none;
 }
 
 .platform-dot.active svg {
