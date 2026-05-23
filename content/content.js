@@ -2214,6 +2214,53 @@ Please confirm you have the full context above and are ready to continue the con
     dragEnterCount = 0;
   }
 
+  function runInjectionAnimation(srcPlatform) {
+    createDropOverlay(srcPlatform);
+    
+    const ol = getOverlayEl();
+    const iconEl  = dropOverlayShadow?.getElementById('cc-drop-icon');
+    const titleEl = dropOverlayShadow?.getElementById('cc-drop-title');
+    const subEl   = dropOverlayShadow?.getElementById('cc-drop-subtitle');
+    const arrowEl = dropOverlayShadow?.getElementById('cc-drop-arrow');
+
+    if (ol) {
+      ol.classList.remove('over');
+      ol.classList.add('injecting');
+    }
+    if (arrowEl) arrowEl.innerHTML  = SPINNER_SVG;
+    if (titleEl) titleEl.textContent = 'Injecting...';
+    if (subEl) {
+      const srcName = PLATFORM_NAMES[srcPlatform] || srcPlatform;
+      subEl.innerHTML = `Transferring context from <strong>${srcName}</strong>…`;
+    }
+
+    return {
+      success: (tgtPlatform) => {
+        if (ol) {
+          ol.classList.remove('injecting');
+          ol.classList.add('success');
+        }
+        if (arrowEl) arrowEl.innerHTML  = CHECK_SVG;
+        if (titleEl) titleEl.textContent = 'Context injected!';
+        if (subEl) {
+          const srcName = PLATFORM_NAMES[srcPlatform] || srcPlatform;
+          subEl.innerHTML = `From <strong style="color:#34d399">${srcName}</strong> — submitted to this chat.`;
+        }
+        setTimeout(removeDropOverlay, 2000);
+      },
+      fail: (errorMsg) => {
+        if (ol) {
+          ol.classList.remove('injecting');
+          ol.classList.add('error-state');
+        }
+        if (arrowEl) arrowEl.innerHTML  = ERROR_SVG;
+        if (titleEl) titleEl.textContent = 'Injection failed';
+        if (subEl)   subEl.textContent   = errorMsg || 'An unexpected error occurred.';
+        setTimeout(removeDropOverlay, 3500);
+      }
+    };
+  }
+
   function getOverlayEl() {
     if (!dropOverlayShadow) return null;
     return dropOverlayShadow.getElementById('cc-drop-overlay');
@@ -2477,11 +2524,18 @@ Please confirm you have the full context above and are ready to continue the con
         sendResponse({ success: false, error: `No injector for: ${message.targetPlatform}` });
         return true;
       }
+      const anim = runInjectionAnimation(message.context.platform);
       const formatted = formatContextPrompt(message.context, message.targetPlatform);
       injector(formatted).then(result => {
+        if (result?.success) {
+          anim.success(message.targetPlatform);
+        } else {
+          anim.fail(result?.error || 'Injection failed');
+        }
         chrome.storage.local.remove('pendingInjection');
         sendResponse(result);
       }).catch(err => {
+        anim.fail(err.message || 'Injection failed');
         sendResponse({ success: false, error: err.message });
       });
       return true;
@@ -2532,13 +2586,25 @@ Please confirm you have the full context above and are ready to continue the con
 
       if (!isRecent || !isTarget) return;
 
-      await sleep(2000); // wait for page to render
+      await sleep(1500); // wait for page to render
 
       const injector = INJECTORS[targetPlatform];
       if (!injector) return;
 
+      const anim = runInjectionAnimation(context.platform);
       const formatted = formatContextPrompt(context, targetPlatform);
-      await injector(formatted);
+      
+      try {
+        const result = await injector(formatted);
+        if (result?.success) {
+          anim.success(targetPlatform);
+        } else {
+          anim.fail(result?.error || 'Injection failed');
+        }
+      } catch (err) {
+        anim.fail(err.message || 'Injection failed');
+      }
+
       await chrome.storage.local.remove('pendingInjection');
 
     } catch (err) {

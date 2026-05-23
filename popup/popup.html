@@ -220,6 +220,25 @@
     </div>
   </div>
 
+  <!-- ── Injecting Overlay ──────────────────── -->
+  <div id="injecting-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Injecting context">
+    <div class="drop-overlay-card">
+      <div class="drop-flow">
+        <div id="inject-source-icon" class="drop-icon source-icon"></div>
+        <div class="drop-flow-connector"></div>
+        <div id="inject-target-icon" class="drop-icon target-icon"></div>
+      </div>
+      <div id="inject-title" class="drop-title">Injecting...</div>
+      <div id="inject-subtitle" class="drop-subtitle">Transferring context...</div>
+      <div id="inject-status-icon" class="drop-status-icon">
+        <svg class="cc-spinner" viewBox="0 0 50 50" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+          <circle class="cc-spinner-bg" cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4.5" opacity="0.15"></circle>
+          <circle class="cc-spinner-path" cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"></circle>
+        </svg>
+      </div>
+    </div>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 
