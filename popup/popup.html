@@ -135,8 +135,18 @@
       
       <!-- Tab Navigation (shown only for AI-Enhanced contexts) -->
       <div id="preview-tabs" class="preview-tabs hidden">
-        <button id="tab-ai-summary" class="tab-btn active">✨ AI Summary</button>
-        <button id="tab-raw-transcript" class="tab-btn">📋 Scraped Data</button>
+        <button id="tab-ai-summary" class="tab-btn active">
+          <svg class="tab-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+          </svg>
+          <span>AI Summary</span>
+        </button>
+        <button id="tab-raw-transcript" class="tab-btn">
+          <svg class="tab-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>
+          </svg>
+          <span>Scraped Data</span>
+        </button>
       </div>
 
       <div id="preview-content-ai" class="preview-content-ai hidden">

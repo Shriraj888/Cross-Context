@@ -293,11 +293,41 @@ function createContextCard(ctx) {
 
   let aiBadgeHtml = '';
   if (ctx.aiStatus === 'pending') {
-    aiBadgeHtml = `<span class="card-ai-badge pending" title="AI Enhancing...">✨</span>`;
+    aiBadgeHtml = `<span class="card-ai-badge pending" title="AI Enhancing...">
+      <svg class="ai-badge-icon loading-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" style="animation: spin 1s linear infinite;">
+        <line x1="12" y1="2" x2="12" y2="6"></line>
+        <line x1="12" y1="18" x2="12" y2="22"></line>
+        <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
+        <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line>
+        <line x1="2" y1="12" x2="6" y2="12"></line>
+        <line x1="18" y1="12" x2="22" y2="12"></line>
+        <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
+        <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
+      </svg>
+    </span>`;
   } else if (ctx.aiStatus === 'success') {
-    aiBadgeHtml = `<span class="card-ai-badge success" title="AI Summarized">✨</span>`;
+    aiBadgeHtml = `<span class="card-ai-badge success" title="AI Summarized">
+      <svg class="ai-badge-icon" width="14" height="14" viewBox="0 0 24 24" fill="url(#ai-badge-grad)">
+        <defs>
+          <linearGradient id="ai-badge-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#fbbf24" />
+            <stop offset="50%" stop-color="#f59e0b" />
+            <stop offset="100%" stop-color="#db2777" />
+          </linearGradient>
+        </defs>
+        <path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z" />
+        <path d="M19 4.5L19.5 6l1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z" opacity="0.85"/>
+        <path d="M5 16.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z" opacity="0.85"/>
+      </svg>
+    </span>`;
   } else if (ctx.aiStatus === 'failed') {
-    aiBadgeHtml = `<span class="card-ai-badge failed" title="AI Failed">⚠️</span>`;
+    aiBadgeHtml = `<span class="card-ai-badge failed" title="AI Failed">
+      <svg class="ai-badge-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+    </span>`;
   }
 
   // Filter platforms to other platforms for quick handoff targets
@@ -316,7 +346,7 @@ function createContextCard(ctx) {
     <div class="card-main">
       <div class="card-left">
         <span class="card-platform-icon">
-          ${getPlatformIcon(ctx.platform, 13)}
+          ${getPlatformIcon(ctx.platform, 18)}
         </span>
         <div class="card-text">
           <div class="card-title" title="${escapeHtml(ctx.title)}">${escapeHtml(ctx.title)}</div>

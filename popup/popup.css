@@ -763,11 +763,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   color: var(--platform-color, var(--text-secondary));
 }
@@ -809,28 +806,21 @@ body {
 }
 
 .card-ai-badge {
-  font-size: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1px solid rgba(124, 58, 237, 0.2);
+  width: 22px;
+  height: 22px;
   color: #8b5cf6;
+  flex-shrink: 0;
 }
 
 .card-ai-badge.pending {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: rgba(245, 158, 11, 0.2);
   color: #f59e0b;
   animation: pulse 1.2s infinite alternate;
 }
 
 .card-ai-badge.failed {
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.2);
   color: var(--error);
 }
 
@@ -1407,10 +1397,24 @@ body {
   transition: var(--transition);
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-btn svg {
+  display: inline-block;
+  vertical-align: middle;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s ease;
+  color: inherit;
 }
 
 .tab-btn:hover {
   color: var(--text-primary);
+}
+
+.tab-btn:hover svg {
+  transform: scale(1.15) rotate(4deg);
 }
 
 .tab-btn.active {
