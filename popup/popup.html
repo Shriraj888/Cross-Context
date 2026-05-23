@@ -25,8 +25,6 @@
       </div>
     </div>
     <div class="header-actions">
-      <!-- Live API key configuration indicator dot -->
-      <span id="api-status-badge" class="api-status-indicator" title="API Status: Unconfigured"></span>
       <button id="btn-settings" class="icon-btn" title="AI Handoff Settings">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round">
@@ -172,7 +170,13 @@
       </div>
       <div class="settings-content">
         <div class="settings-group">
-          <label class="settings-label" for="setting-api-key">Gemini API Key (Google AI Studio)</label>
+          <div class="settings-label-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="settings-label" for="setting-api-key" style="display: flex; align-items: center; gap: 4px;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color: var(--accent-light);"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 0-7.778 7.778 5.5 5.5 0 0 0 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
+              <span>Gemini API Key (Google AI Studio)</span>
+            </label>
+            <span id="api-status-badge" class="api-status-indicator-badge unconfigured">Unconfigured</span>
+          </div>
           <div class="input-password-wrapper">
             <input type="password" id="setting-api-key" placeholder="AI Studio API Key..." class="settings-input" />
             <button id="btn-toggle-api-key" class="password-toggle-btn" type="button" title="Toggle Visibility">

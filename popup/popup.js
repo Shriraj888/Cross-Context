@@ -917,10 +917,12 @@ function closeSettingsModal() {
 
 function updateApiBadgeStatus(apiKey) {
   if (apiKey && apiKey.trim().length > 5) {
-    apiStatusBadge.className = 'api-status-indicator configured';
+    apiStatusBadge.className = 'api-status-indicator-badge configured';
+    apiStatusBadge.textContent = 'Configured';
     apiStatusBadge.title = 'AI Studio API Key: Configured';
   } else {
-    apiStatusBadge.className = 'api-status-indicator unconfigured';
+    apiStatusBadge.className = 'api-status-indicator-badge unconfigured';
+    apiStatusBadge.textContent = 'Unconfigured';
     apiStatusBadge.title = 'AI Studio API Key: Unconfigured';
   }
 }

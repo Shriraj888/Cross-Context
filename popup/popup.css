@@ -237,27 +237,32 @@ body {
   color: var(--text-primary);
 }
 
-/* API Status Indicator */
-.api-status-indicator {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  display: inline-block;
-  margin-right: 4px;
+/* API Status Indicator Badge */
+.api-status-indicator-badge {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 99px;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 0 4px rgba(0,0,0,0.5);
-  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.api-status-indicator.configured {
-  background: var(--success);
-  box-shadow: 0 0 8px var(--success), 0 0 16px rgba(16, 185, 129, 0.4);
+.api-status-indicator-badge.configured {
+  background: rgba(16, 185, 129, 0.08);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.1);
 }
 
-.api-status-indicator.unconfigured {
-  background: var(--warning);
-  box-shadow: 0 0 8px var(--warning), 0 0 16px rgba(245, 158, 11, 0.4);
+.api-status-indicator-badge.unconfigured {
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.1);
 }
 
 /* ── Dynamic Active Tab Console ───────────── */
