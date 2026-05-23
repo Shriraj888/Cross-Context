@@ -80,18 +80,48 @@ let dragToPageHintTimer = null;
 // ──────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const btnCapture          = $('btn-capture');
+const btnCaptureAi        = $('btn-capture-ai');
 const btnClearAll         = $('btn-clear-all');
+const btnSettings         = $('btn-settings');
 const currentPlatformLabel= $('current-platform-label');
 const platformDot         = $('platform-dot');
 const contextsList        = $('contexts-list');
 const emptyState          = $('empty-state');
 const contextCountBadge   = $('context-count');
 const toast               = $('toast');
-const dragToPageHint      = $('drag-to-page-hint');
 
 const previewModal        = $('preview-modal');
 const previewClose        = $('preview-close');
 const previewContent      = $('preview-content');
+
+// New Preview tabs and panels
+const previewTabs         = $('preview-tabs');
+const tabAiSummary        = $('tab-ai-summary');
+const tabRawTranscript    = $('tab-raw-transcript');
+const previewContentAi    = $('preview-content-ai');
+
+// Settings modal elements
+const settingsModal       = $('settings-modal');
+const settingsClose       = $('settings-close');
+const btnSaveSettings     = $('btn-save-settings');
+const btnToggleApiKey     = $('btn-toggle-api-key');
+const inputApiKey         = $('setting-api-key');
+const selectModel         = $('setting-model');
+const inputModelCustom    = $('setting-model-custom');
+const checkboxEnableAi    = $('setting-enable-ai');
+
+// Redesign elements
+const apiStatusBadge      = $('api-status-badge');
+const searchInput         = $('search-input');
+const btnClearSearch      = $('btn-clear-search');
+const filterChips         = $('filter-chips');
+const consoleCard         = $('console-card');
+
+// Tracking state
+let currentPreviewId = null;
+let currentPreviewTab = 'ai-summary';
+let currentSearchQuery = '';
+let currentFilterPlatform = 'all';
 
 // ──────────────────────────────────────────
 // Init
@@ -99,6 +129,8 @@ const previewContent      = $('preview-content');
 document.addEventListener('DOMContentLoaded', async () => {
   await detectCurrentTab();
   await loadContexts();
+  await loadSettings();
+  
   if (window.location.protocol === 'file:' && savedContexts.length === 0) {
     savedContexts = [
       {
@@ -110,7 +142,17 @@ document.addEventListener('DOMContentLoaded', async () => {
           { role: 'assistant', content: 'To set up a connection pool in Actix-web with SQLx, you first create the pool in your main function, and then pass it to the app using `.app_data(web::Data::new(pool))`. Here is a complete code example showing how to initialize the PgPool...' }
         ],
         messageCount: 2,
-        timestamp: Date.now() - 3600000 * 2
+        timestamp: Date.now() - 3600000 * 2,
+        aiStatus: 'success',
+        aiEnhanced: {
+          summary: 'The user is seeking assistance with initializing a PgPool database connection pool in a Rust Actix-web web server using SQLx, and passing it as application data.',
+          keyPoints: [
+            'Rust web server using Actix-web and SQLx PgPool',
+            'Connection pool is initialized in the main function',
+            'Passed to application state using .app_data(web::Data::new(pool))'
+          ],
+          handoffPrompt: '[🔄 AI-Enhanced Cross Context Transfer]\nThe user is building a Rust web server using Actix-web and SQLx. They need help setting up the PgPool connection pool and passing it into Actix web application state.'
+        }
       },
       {
         id: 'mock_chatgpt',
@@ -121,23 +163,17 @@ document.addEventListener('DOMContentLoaded', async () => {
           { role: 'assistant', content: 'Here is a custom useDebounce hook in TypeScript. It takes a value and delay, and returns the debounced value. You can use it in your search bar input component to prevent excessive API requests...' }
         ],
         messageCount: 4,
-        timestamp: Date.now() - 3600000 * 24
-      },
-      {
-        id: 'mock_gemini',
-        platform: 'gemini',
-        title: 'Overview of modern vector database architectures',
-        messages: [
-          { role: 'user', content: 'What are the main differences between Milvus, Qdrant, and Pinecone?' },
-          { role: 'assistant', content: 'The primary differences lie in hosting, underlying language, index support, and scaling architectures. Pinecone is a fully managed cloud-native SaaS, Milvus is highly distributed and container-native, and Qdrant is written in Rust, focusing on efficiency and developer experience...' }
-        ],
-        messageCount: 6,
-        timestamp: Date.now() - 3600000 * 48
+        timestamp: Date.now() - 3600000 * 24,
+        aiStatus: 'idle'
       }
     ];
     renderContexts();
   }
   bindEvents();
+  setTimeout(syncFilterBackdrop, 100); // position sliding capsule
+  setupSettingsListeners();
+  setupTabListeners();
+  setupStorageChangeListener();
 });
 
 // ──────────────────────────────────────────
@@ -155,23 +191,33 @@ async function detectCurrentTab() {
       if (config.hosts.some(h => hostname.includes(h))) {
         currentTabPlatform = key;
         const cfg = PLATFORMS[key];
-        currentPlatformLabel.textContent = `${cfg.name} — ${cfg.sub}`;
+        currentPlatformLabel.textContent = `${cfg.name} active`;
         platformDot.className = `platform-dot active dot-${key}`;
         platformDot.innerHTML = getPlatformIcon(key, 14);
         platformDot.style.color = getComputedStyle(document.documentElement)
           .getPropertyValue(`--${key}`) || '#3b82f6';
+        
+        consoleCard.className = `console-card platform-${key}`;
+        
         btnCapture.disabled = false;
+        btnCaptureAi.disabled = false;
         return;
       }
     }
 
-    currentPlatformLabel.textContent = 'Not on a supported LLM page';
+    currentPlatformLabel.textContent = 'Open an AI chat to capture context';
     platformDot.className = 'platform-dot';
     platformDot.innerHTML = '';
     platformDot.style.color = '';
+    consoleCard.className = 'console-card inactive';
+    btnCapture.disabled = true;
+    btnCaptureAi.disabled = true;
 
   } catch (err) {
     currentPlatformLabel.textContent = 'Could not detect page';
+    consoleCard.className = 'console-card inactive';
+    btnCapture.disabled = true;
+    btnCaptureAi.disabled = true;
   }
 }
 
@@ -192,16 +238,41 @@ async function loadContexts() {
 function renderContexts() {
   contextCountBadge.textContent = savedContexts.length;
 
-  if (savedContexts.length === 0) {
+  let filtered = savedContexts;
+  if (currentFilterPlatform !== 'all') {
+    filtered = filtered.filter(ctx => ctx.platform === currentFilterPlatform);
+  }
+  if (currentSearchQuery) {
+    filtered = filtered.filter(ctx => 
+      ctx.title.toLowerCase().includes(currentSearchQuery) ||
+      ctx.platform.toLowerCase().includes(currentSearchQuery) ||
+      (ctx.aiEnhanced && ctx.aiEnhanced.summary && ctx.aiEnhanced.summary.toLowerCase().includes(currentSearchQuery))
+    );
+  }
+
+  if (filtered.length === 0) {
     contextsList.innerHTML = '';
-    contextsList.appendChild(emptyState);
+    if (currentSearchQuery || currentFilterPlatform !== 'all') {
+      const searchEmpty = document.createElement('div');
+      searchEmpty.className = 'empty-state';
+      searchEmpty.innerHTML = `
+        <div class="empty-icon">🔍</div>
+        <p class="empty-title">No matching contexts</p>
+        <p class="empty-sub">Try refining your search terms<br>or select another filter.</p>
+      `;
+      contextsList.appendChild(searchEmpty);
+    } else {
+      contextsList.appendChild(emptyState);
+    }
     return;
   }
 
-  emptyState.remove();
+  if (emptyState.parentNode) {
+    emptyState.remove();
+  }
   contextsList.innerHTML = '';
 
-  savedContexts.forEach(ctx => {
+  filtered.forEach(ctx => {
     const card = createContextCard(ctx);
     contextsList.appendChild(card);
   });
@@ -213,55 +284,96 @@ function createContextCard(ctx) {
   const msgCount = ctx.messageCount || ctx.messages?.length || 0;
 
   const card = document.createElement('div');
-  card.className = `context-card p-${ctx.platform}`;
+  card.className = `context-card platform-${ctx.platform}`;
   card.dataset.id = ctx.id;
-  card.setAttribute('draggable', 'true');
+  
+  if (ctx.aiStatus !== 'pending') {
+    card.setAttribute('draggable', 'true');
+  }
+
+  let aiBadgeHtml = '';
+  if (ctx.aiStatus === 'pending') {
+    aiBadgeHtml = `<span class="card-ai-badge pending" title="AI Enhancing...">✨</span>`;
+  } else if (ctx.aiStatus === 'success') {
+    aiBadgeHtml = `<span class="card-ai-badge success" title="AI Summarized">✨</span>`;
+  } else if (ctx.aiStatus === 'failed') {
+    aiBadgeHtml = `<span class="card-ai-badge failed" title="AI Failed">⚠️</span>`;
+  }
+
+  // Filter platforms to other platforms for quick handoff targets
+  const targets = Object.keys(PLATFORMS).filter(p => p !== ctx.platform);
+  let targetsHtml = '';
+  targets.forEach(tgt => {
+    const tgtPlatform = PLATFORMS[tgt];
+    targetsHtml += `
+      <button class="quick-inject-btn target-${tgt}" data-action="quick-inject" data-target="${tgt}" data-id="${ctx.id}" title="Handoff to ${tgtPlatform.name}">
+        ${getPlatformIcon(tgt, 11)}
+      </button>
+    `;
+  });
 
   card.innerHTML = `
-    <div class="card-top">
-      <span class="card-platform-badge badge-${ctx.platform}">
-        ${getPlatformIcon(ctx.platform, 12)}<span>${platform.name}</span>
-      </span>
-      <div class="drag-handle" title="Drag this context and drop it onto the page">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/>
-          <circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/>
-        </svg>
+    <div class="card-main">
+      <div class="card-left">
+        <span class="card-platform-icon">
+          ${getPlatformIcon(ctx.platform, 13)}
+        </span>
+        <div class="card-text">
+          <div class="card-title" title="${escapeHtml(ctx.title)}">${escapeHtml(ctx.title)}</div>
+          <div class="card-sub">
+            <span>${timeAgo}</span>
+            <span class="dot-separator">•</span>
+            <span>${msgCount} turns</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-right">
+        ${aiBadgeHtml}
+        <div class="drag-handle" title="Drag to transfer context">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/>
+            <circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
+          </svg>
+        </div>
       </div>
     </div>
-    <div class="card-title">${escapeHtml(ctx.title)}</div>
-    <div class="card-meta">
-      <span class="card-meta-item">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        ${timeAgo}
-      </span>
-      <span class="card-meta-item">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-        ${msgCount} messages
-      </span>
-    </div>
-    <div class="card-actions">
-      <button class="btn-preview" data-action="preview" data-id="${ctx.id}">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        Preview Context
-      </button>
-      <button class="btn-delete-card" data-action="delete" data-id="${ctx.id}" title="Delete">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+    
+    <!-- Hover Overlay Actions -->
+    <div class="card-hover-actions">
+      <div class="hover-action-left">
+        <button class="hover-action-btn copy-btn" data-action="copy" data-id="${ctx.id}" title="Copy optimized handoff prompt">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <span>Copy</span>
+        </button>
+        <button class="hover-action-btn preview-btn" data-action="preview" data-id="${ctx.id}" title="Open Preview">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          <span>Preview</span>
+        </button>
+      </div>
+      <div class="quick-inject-tray">
+        ${targetsHtml}
+      </div>
+      <button class="hover-action-btn delete-btn" data-action="delete" data-id="${ctx.id}" title="Delete Context">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+        </svg>
       </button>
     </div>
   `;
 
-  // Drag Events — write to storage FIRST so content script has data even after popup closes
+  // Setup Drag Events
   card.addEventListener('dragstart', (e) => {
     draggedContextId = ctx.id;
     card.classList.add('dragging');
     document.body.classList.add('is-dragging');
     e.dataTransfer.effectAllowed = 'copy';
 
-    // Format prompt text to set as the plain text drag payload
     const formattedPrompt = formatContextPrompt(ctx);
 
-    // Set both data types for maximum compatibility
     e.dataTransfer.setData('text/plain', formattedPrompt);
     e.dataTransfer.setData('text/x-cross-context', JSON.stringify({
       id: ctx.id,
@@ -269,7 +381,6 @@ function createContextCard(ctx) {
       title: ctx.title,
       source: 'cross-context-extension'
     }));
-    // Custom mime type to allow synchronous, latency-free source platform detection in content script
     e.dataTransfer.setData(`text/x-cross-context-source-${ctx.platform}`, 'true');
     e.dataTransfer.setData('text/x-cross-context-active', 'true');
 
@@ -280,16 +391,14 @@ function createContextCard(ctx) {
       timestamp: Date.now()
     };
 
-    // Write to storage — content script picks this up via storage.onChanged
     chrome.storage.local.set({ pendingDrop });
 
-    // Also directly message all LLM tabs in the last focused window to arm the drop zone synchronously.
     chrome.tabs.query({ lastFocusedWindow: true }, (tabs) => {
       for (const tab of tabs) {
         chrome.tabs.sendMessage(tab.id, {
           type: 'ARM_DROP',
           payload: pendingDrop
-        }).catch(() => {}); // silently ignore tabs without the content script
+        }).catch(() => {});
       }
     });
   });
@@ -299,7 +408,6 @@ function createContextCard(ctx) {
     document.body.classList.remove('is-dragging');
     draggedContextId = null;
 
-    // Clear pending drop after delay (let content script drop handler run first)
     setTimeout(() => {
       chrome.storage.local.remove('pendingDrop');
       chrome.tabs.query({ lastFocusedWindow: true }, (tabs) => {
@@ -313,12 +421,61 @@ function createContextCard(ctx) {
   return card;
 }
 
+// Copy prompt directly to clipboard
+async function handleDirectCopy(id) {
+  const ctx = savedContexts.find(c => c.id === id);
+  if (!ctx) return;
+  
+  try {
+    const formatted = formatContextPrompt(ctx);
+    await navigator.clipboard.writeText(formatted);
+    showToast('✓ Handoff prompt copied!', 'success');
+  } catch (err) {
+    showToast('⚠️ Copy failed: ' + err.message, 'error');
+  }
+}
+
+// Quick transfer inject trigger
+async function handleQuickInject(id, targetPlatform) {
+  const ctx = savedContexts.find(c => c.id === id);
+  if (!ctx) return;
+
+  try {
+    showToast(`🚀 Launching ${PLATFORMS[targetPlatform].name}...`, 'info');
+    const result = await sendMessage({
+      type: 'INJECT_CONTEXT',
+      payload: { context: ctx, targetPlatform }
+    });
+    if (!result?.success) {
+      showToast(result?.error || 'Launch failed', 'error');
+    }
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+// Sync sliding backdrop positioning for active filter chip
+function syncFilterBackdrop() {
+  const activeChip = filterChips.querySelector('.filter-chip.active');
+  const backdrop = $('filter-backdrop');
+  if (!activeChip || !backdrop) return;
+
+  backdrop.style.left = `${activeChip.offsetLeft}px`;
+  backdrop.style.width = `${activeChip.offsetWidth}px`;
+  backdrop.style.height = `${activeChip.offsetHeight}px`;
+  backdrop.style.top = `${activeChip.offsetTop}px`;
+  
+  const platform = activeChip.dataset.platform;
+  backdrop.className = `filter-backdrop platform-${platform}`;
+}
+
 // ──────────────────────────────────────────
 // Event Bindings
 // ──────────────────────────────────────────
 function bindEvents() {
-  // Capture button
-  btnCapture.addEventListener('click', handleCapture);
+  // Capture buttons
+  btnCapture.addEventListener('click', handleCaptureNormal);
+  btnCaptureAi.addEventListener('click', handleCaptureAi);
 
   // Clear all
   btnClearAll.addEventListener('click', handleClearAll);
@@ -328,8 +485,49 @@ function bindEvents() {
     const actionEl = e.target.closest('[data-action]');
     if (!actionEl) return;
     const { action, id } = actionEl.dataset;
-    if (action === 'preview') openPreviewModal(id);
-    if (action === 'delete')  handleDeleteContext(id);
+    
+    if (action === 'preview') {
+      openPreviewModal(id);
+    } else if (action === 'delete') {
+      handleDeleteContext(id);
+    } else if (action === 'copy') {
+      handleDirectCopy(id);
+    } else if (action === 'quick-inject') {
+      const target = actionEl.dataset.target;
+      handleQuickInject(id, target);
+    }
+  });
+
+  // Live Search Input Handler
+  searchInput.addEventListener('input', () => {
+    currentSearchQuery = searchInput.value.toLowerCase().trim();
+    if (currentSearchQuery) {
+      btnClearSearch.classList.remove('hidden');
+    } else {
+      btnClearSearch.classList.add('hidden');
+    }
+    renderContexts();
+  });
+
+  // Clear Search
+  btnClearSearch.addEventListener('click', () => {
+    searchInput.value = '';
+    currentSearchQuery = '';
+    btnClearSearch.classList.add('hidden');
+    renderContexts();
+  });
+
+  // Platform Filter Chips
+  filterChips.addEventListener('click', e => {
+    const chip = e.target.closest('.filter-chip');
+    if (!chip) return;
+
+    filterChips.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+
+    currentFilterPlatform = chip.dataset.platform;
+    renderContexts();
+    syncFilterBackdrop();
   });
 
   // Preview modal close
@@ -342,17 +540,35 @@ function bindEvents() {
 // ──────────────────────────────────────────
 // Capture Handler
 // ──────────────────────────────────────────
-async function handleCapture() {
+async function handleCaptureNormal() {
+  await captureConversation(false);
+}
+
+async function handleCaptureAi() {
+  const settings = await chrome.storage.local.get(['geminiApiKey']);
+  if (!settings.geminiApiKey) {
+    showToast('⚠️ Please configure Gemini API Key in settings first', 'error');
+    openSettingsModal();
+    return;
+  }
+  await captureConversation(true);
+}
+
+async function captureConversation(isAiScrape) {
   if (!currentTabPlatform) return;
 
-  btnCapture.classList.add('loading');
-  btnCapture.disabled = true;
+  const activeBtn = isAiScrape ? btnCaptureAi : btnCapture;
+  const otherBtn = isAiScrape ? btnCapture : btnCaptureAi;
+
+  activeBtn.classList.add('loading');
+  activeBtn.disabled = true;
+  otherBtn.disabled = true;
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     // Send scrape request to content script via background
-    const result = await sendMessage({ type: 'SCRAPE_REQUEST' });
+    const result = await sendMessage({ type: 'SCRAPE_REQUEST', isAiScrape });
 
     if (!result?.success) {
       showToast(result?.error || 'Could not scrape conversation. Make sure you have a conversation open.', 'error');
@@ -362,38 +578,180 @@ async function handleCapture() {
     // Save to storage
     const saveResult = await sendMessage({
       type: 'SAVE_CONTEXT',
-      payload: { ...result.context, url: tab.url }
+      payload: { ...result.context, url: tab.url, isAiScrape }
     });
 
     if (saveResult?.success) {
-      savedContexts = [saveResult.context, ...savedContexts];
+      savedContexts = [saveResult.context, ...savedContexts.filter(c => c.id !== saveResult.context.id)];
       renderContexts();
-      // Show role breakdown so user can verify both sides were captured
+      
       const msgs = result.context.messages;
       const userCount = msgs.filter(m => m.role === 'user').length;
       const assistantCount = msgs.filter(m => m.role === 'assistant').length;
       const platformName = PLATFORMS[currentTabPlatform]?.name;
-      showToast(`✓ ${platformName}: ${userCount} user + ${assistantCount} assistant messages captured`, 'success');
+      
+      let imgCount = 0;
+      msgs.forEach(m => {
+        if (m.images) imgCount += m.images.length;
+      });
+
+      let toastMsg = `✓ ${platformName}: ${userCount} user + ${assistantCount} assistant turns captured`;
+      if (imgCount > 0) {
+        toastMsg += ` with ${imgCount} diagram/image(s)`;
+      }
+
+      if (isAiScrape) {
+        toastMsg += '. ✨ Processing AI compression in background...';
+      }
+
+      showToast(toastMsg, 'success');
     } else {
-      showToast('Failed to save context', 'error');
+      if (saveResult?.error === 'quota_exceeded') {
+        showToast('⚠️ Storage limit reached! Please delete past contexts to free up space.', 'error');
+      } else {
+        showToast(saveResult?.error || 'Failed to save context', 'error');
+      }
     }
 
   } catch (err) {
     showToast('Error: ' + err.message, 'error');
   } finally {
-    btnCapture.classList.remove('loading');
-    btnCapture.disabled = false;
+    activeBtn.classList.remove('loading');
+    detectCurrentTab(); // resets both button disabled states
   }
 }
 
 // ──────────────────────────────────────────
-// Preview Modal
+// Preview Modal & Tabs Rendering
 // ──────────────────────────────────────────
 function openPreviewModal(contextId) {
   const ctx = savedContexts.find(c => c.id === contextId);
   if (!ctx) return;
 
+  currentPreviewId = contextId;
+  currentPreviewTab = 'ai-summary'; // default tab
+  renderPreviewContent(ctx);
+  previewModal.classList.remove('hidden');
+}
+
+function closePreviewModal() {
+  previewModal.classList.add('hidden');
+  currentPreviewId = null;
+}
+
+function renderPreviewContent(ctx) {
   previewContent.innerHTML = '';
+  previewContentAi.innerHTML = '';
+
+  const isAiEnhanced = ctx.aiEnhanced && ctx.aiStatus === 'success';
+
+  if (isAiEnhanced) {
+    previewTabs.classList.remove('hidden');
+
+    // Create AI summary tab layout
+    let imagesGalleryHtml = '';
+    
+    // Gather all images from all message turns
+    const allImages = [];
+    ctx.messages.forEach(msg => {
+      if (msg.images && Array.isArray(msg.images)) {
+        allImages.push(...msg.images);
+      }
+    });
+
+    if (allImages.length > 0) {
+      imagesGalleryHtml = `
+        <div class="ai-section">
+          <span class="ai-section-title">Scraped Diagrams & Images (${allImages.length}/5)</span>
+          <div class="ai-image-gallery">
+            ${allImages.map(imgSrc => `
+              <div class="ai-image-thumbnail">
+                <img src="${imgSrc}" alt="Scraped context asset" />
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    let visualAnalysisHtml = '';
+    if (ctx.aiEnhanced.visualAnalysis) {
+      visualAnalysisHtml = `
+        <div class="ai-section">
+          <span class="ai-section-title">Visual Layout Description</span>
+          <div class="ai-summary-text">${escapeHtml(ctx.aiEnhanced.visualAnalysis)}</div>
+        </div>
+      `;
+    }
+
+    previewContentAi.innerHTML = `
+      <div class="ai-section">
+        <span class="ai-section-title">AI Synthesized Summary</span>
+        <div class="ai-summary-text">${escapeHtml(ctx.aiEnhanced.summary)}</div>
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">Key Technical Points</span>
+        <ul class="ai-bullet-list">
+          ${ctx.aiEnhanced.keyPoints.map(pt => `<li>${escapeHtml(pt)}</li>`).join('')}
+        </ul>
+      </div>
+
+      ${visualAnalysisHtml}
+      ${imagesGalleryHtml}
+
+      <div class="ai-section ai-prompt-box-wrapper">
+        <span class="ai-section-title">Optimized Handoff Prompt</span>
+        <div class="ai-prompt-box">${escapeHtml(ctx.aiEnhanced.handoffPrompt)}</div>
+        <button id="btn-copy-ai-prompt" class="btn-copy-ai-prompt">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          Copy Handoff Prompt
+        </button>
+      </div>
+    `;
+
+    // Manage tab visibility class toggling
+    if (currentPreviewTab === 'ai-summary') {
+      previewContentAi.classList.remove('hidden');
+      previewContent.classList.add('hidden');
+      tabAiSummary.classList.add('active');
+      tabRawTranscript.classList.remove('active');
+    } else {
+      previewContentAi.classList.add('hidden');
+      previewContent.classList.remove('hidden');
+      tabAiSummary.classList.remove('active');
+      tabRawTranscript.classList.add('active');
+    }
+
+    // Attach prompt copy click
+    const copyBtn = previewContentAi.querySelector('#btn-copy-ai-prompt');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(ctx.aiEnhanced.handoffPrompt);
+        showToast('✓ Handoff prompt copied!', 'success');
+      });
+    }
+
+    // Attach full-screen thumbnail zoom viewer click
+    const thumbs = previewContentAi.querySelectorAll('.ai-image-thumbnail img');
+    thumbs.forEach(thumb => {
+      thumb.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openFullscreenImage(thumb.src);
+      });
+    });
+
+  } else {
+    // Hide tabs, show only raw transcript if not enhanced
+    previewTabs.classList.add('hidden');
+    previewContentAi.classList.add('hidden');
+    previewContent.classList.remove('hidden');
+  }
+
+  // Render raw transcript layout
   ctx.messages.forEach(msg => {
     const isUser = msg.role === 'user';
     let headerHtml = '';
@@ -415,18 +773,166 @@ function openPreviewModal(contextId) {
 
     const msgDiv = document.createElement('div');
     msgDiv.className = `preview-message role-${msg.role} ${extraClass}`.trim();
+    
+    let msgImagesHtml = '';
+    if (msg.images && msg.images.length > 0) {
+      msgImagesHtml = `
+        <div class="ai-image-gallery" style="margin-top: 8px;">
+          ${msg.images.map(imgSrc => `
+            <div class="ai-image-thumbnail">
+              <img src="${imgSrc}" alt="Scraped conversation diagram" />
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
     msgDiv.innerHTML = `
       <div class="preview-message-header">${headerHtml}</div>
       <div class="preview-message-body">${escapeHtml(msg.content)}</div>
+      ${msgImagesHtml}
     `;
     previewContent.appendChild(msgDiv);
-  });
 
-  previewModal.classList.remove('hidden');
+    // Attach full-screen thumbnail zoom inside raw transcript too
+    const msgThumbs = msgDiv.querySelectorAll('.ai-image-thumbnail img');
+    msgThumbs.forEach(thumb => {
+      thumb.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openFullscreenImage(thumb.src);
+      });
+    });
+  });
 }
 
-function closePreviewModal() {
-  previewModal.classList.add('hidden');
+function openFullscreenImage(src) {
+  const viewer = document.createElement('div');
+  viewer.className = 'fullscreen-image-overlay';
+  viewer.innerHTML = `<img src="${src}" alt="Zoomed view of diagram" />`;
+  viewer.addEventListener('click', () => {
+    viewer.remove();
+  });
+  document.body.appendChild(viewer);
+}
+
+// ──────────────────────────────────────────
+// Settings Modal Event Listeners & Logic
+// ──────────────────────────────────────────
+function openSettingsModal() {
+  loadSettings();
+  settingsModal.classList.remove('hidden');
+}
+
+function closeSettingsModal() {
+  settingsModal.classList.add('hidden');
+}
+
+function updateApiBadgeStatus(apiKey) {
+  if (apiKey && apiKey.trim().length > 5) {
+    apiStatusBadge.className = 'api-status-indicator configured';
+    apiStatusBadge.title = 'AI Studio API Key: Configured';
+  } else {
+    apiStatusBadge.className = 'api-status-indicator unconfigured';
+    apiStatusBadge.title = 'AI Studio API Key: Unconfigured';
+  }
+}
+
+async function loadSettings() {
+  const settings = await chrome.storage.local.get(['geminiApiKey', 'geminiModel', 'aiEnhancementEnabled']);
+  inputApiKey.value = settings.geminiApiKey || '';
+  const model = settings.geminiModel || 'gemini-3.5-flash';
+  
+  if (['gemini-3.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'].includes(model)) {
+    selectModel.value = model;
+    inputModelCustom.classList.add('hidden');
+    inputModelCustom.value = '';
+  } else {
+    selectModel.value = 'custom';
+    inputModelCustom.classList.remove('hidden');
+    inputModelCustom.value = model;
+  }
+  checkboxEnableAi.checked = settings.aiEnhancementEnabled !== false;
+  
+  updateApiBadgeStatus(settings.geminiApiKey);
+}
+
+async function handleSaveSettings() {
+  const apiKey = inputApiKey.value.trim();
+  const modelType = selectModel.value;
+  let modelName = modelType;
+  if (modelType === 'custom') {
+    modelName = inputModelCustom.value.trim();
+    if (!modelName) {
+      showToast('⚠️ Please enter custom model name', 'error');
+      return;
+    }
+  }
+  const enableAi = checkboxEnableAi.checked;
+
+  await chrome.storage.local.set({
+    geminiApiKey: apiKey,
+    geminiModel: modelName,
+    aiEnhancementEnabled: enableAi
+  });
+
+  updateApiBadgeStatus(apiKey);
+  showToast('✓ AI settings saved', 'success');
+  closeSettingsModal();
+}
+
+function setupSettingsListeners() {
+  btnSettings.addEventListener('click', openSettingsModal);
+  settingsClose.addEventListener('click', closeSettingsModal);
+  settingsModal.addEventListener('click', e => {
+    if (e.target === settingsModal) closeSettingsModal();
+  });
+  
+  btnSaveSettings.addEventListener('click', handleSaveSettings);
+
+  btnToggleApiKey.addEventListener('click', () => {
+    const isSecret = inputApiKey.type === 'password';
+    inputApiKey.type = isSecret ? 'text' : 'password';
+    btnToggleApiKey.textContent = isSecret ? '🙈' : '👁️';
+  });
+
+  selectModel.addEventListener('change', () => {
+    if (selectModel.value === 'custom') {
+      inputModelCustom.classList.remove('hidden');
+    } else {
+      inputModelCustom.classList.add('hidden');
+    }
+  });
+}
+
+function setupTabListeners() {
+  tabAiSummary.addEventListener('click', () => {
+    currentPreviewTab = 'ai-summary';
+    const ctx = savedContexts.find(c => c.id === currentPreviewId);
+    if (ctx) renderPreviewContent(ctx);
+  });
+
+  tabRawTranscript.addEventListener('click', () => {
+    currentPreviewTab = 'raw-transcript';
+    const ctx = savedContexts.find(c => c.id === currentPreviewId);
+    if (ctx) renderPreviewContent(ctx);
+  });
+}
+
+function setupStorageChangeListener() {
+  chrome.storage.onChanged.addListener(async (changes, area) => {
+    if (area === 'local' && changes.contexts) {
+      savedContexts = changes.contexts.newValue || [];
+      await loadContexts(); // reloads lists and re-renders them
+      
+      // Update preview modal in real-time if open
+      if (currentPreviewId && !previewModal.classList.contains('hidden')) {
+        const updatedCtx = savedContexts.find(c => c.id === currentPreviewId);
+        if (updatedCtx && updatedCtx.aiStatus !== 'pending') {
+          renderPreviewContent(updatedCtx);
+        }
+      }
+    }
+  });
 }
 
 // ──────────────────────────────────────────
@@ -514,6 +1020,11 @@ const PLATFORM_NAMES = {
 };
 
 function formatContextPrompt(context) {
+  // If the context has been successfully enhanced by Gemini AI, use it directly
+  if (context.aiEnhanced && context.aiEnhanced.handoffPrompt) {
+    return context.aiEnhanced.handoffPrompt;
+  }
+
   const MAX_TURNS  = 40;
   const CHAR_LIMIT = 80000;
 

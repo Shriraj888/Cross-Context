@@ -13,7 +13,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     DELETE_CONTEXT:   () => handleDeleteContext(message.id, sendResponse),
     CLEAR_CONTEXTS:   () => handleClearContexts(sendResponse),
     INJECT_CONTEXT:   () => handleInjectContext(message.payload, sendResponse),
-    SCRAPE_REQUEST:   () => handleScrapeRequest(sendResponse),
+    SCRAPE_REQUEST:   () => handleScrapeRequest(message, sendResponse),
+    FETCH_IMAGE_BASE64: () => handleFetchImageBase64(message.url, sendResponse),
   };
 
   const handler = handlers[message.type];
@@ -28,7 +29,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ──────────────────────────────────────────────
 async function handleSaveContext(context, sendResponse) {
   try {
-    const { contexts = [] } = await chrome.storage.local.get('contexts');
+    const { contexts = [], geminiApiKey, aiEnhancementEnabled } = await chrome.storage.local.get([
+      'contexts',
+      'geminiApiKey',
+      'aiEnhancementEnabled'
+    ]);
+
+    const isAiScrape = !!context.isAiScrape;
+    const hasKey = !!geminiApiKey;
+    const isAiEnabled = aiEnhancementEnabled !== false; // default to true if key is present
 
     const newContext = {
       id: generateId(),
@@ -38,13 +47,31 @@ async function handleSaveContext(context, sendResponse) {
       messageCount: context.messages.length,
       timestamp: Date.now(),
       url: context.url || '',
+      aiStatus: (isAiScrape && hasKey && isAiEnabled) ? 'pending' : 'idle',
     };
 
     // Prepend new context, keep only MAX_SAVED_CONTEXTS
     const updated = [newContext, ...contexts].slice(0, MAX_SAVED_CONTEXTS);
-    await chrome.storage.local.set({ contexts: updated });
+    
+    try {
+      await chrome.storage.local.set({ contexts: updated });
+    } catch (storageErr) {
+      const errMsg = storageErr.message || '';
+      if (errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('limit')) {
+        sendResponse({ success: false, error: 'quota_exceeded' });
+        return;
+      }
+      throw storageErr;
+    }
 
     sendResponse({ success: true, context: newContext });
+
+    // Kick off Gemini API enhancement asynchronously in background
+    if (newContext.aiStatus === 'pending') {
+      runGeminiEnhancement(newContext.id).catch(err => {
+        console.error('Cross Context: runGeminiEnhancement background error', err);
+      });
+    }
   } catch (err) {
     sendResponse({ success: false, error: err.message });
   }
@@ -143,7 +170,7 @@ async function handleInjectContext(payload, sendResponse) {
 // ──────────────────────────────────────────────
 // Scrape Request — tells content script to scrape
 // ──────────────────────────────────────────────
-async function handleScrapeRequest(sendResponse) {
+async function handleScrapeRequest(message, sendResponse) {
   try {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!activeTab) {
@@ -177,7 +204,10 @@ async function handleScrapeRequest(sendResponse) {
       }
     }
 
-    const results = await chrome.tabs.sendMessage(activeTab.id, { type: 'DO_SCRAPE' });
+    const results = await chrome.tabs.sendMessage(activeTab.id, {
+      type: 'DO_SCRAPE',
+      isAiScrape: !!message.isAiScrape
+    });
     sendResponse(results);
   } catch (err) {
     sendResponse({
@@ -201,4 +231,164 @@ function generateTitle(context) {
     return firstUser.content.substring(0, 60) + (firstUser.content.length > 60 ? '…' : '');
   }
   return `${context.platform} conversation`;
+}
+
+// ──────────────────────────────────────────────
+// Image Fetcher & Bypass CORS
+// ──────────────────────────────────────────────
+async function handleFetchImageBase64(url, sendResponse) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const mimeType = blob.type || 'image/png';
+    const arrayBuffer = await blob.arrayBuffer();
+    
+    let binary = '';
+    const bytes = new Uint8Array(arrayBuffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Data = btoa(binary);
+    sendResponse({ success: true, base64: `data:${mimeType};base64,${base64Data}` });
+  } catch (err) {
+    console.error('Cross Context: Fetch image failed', url, err);
+    sendResponse({ success: false, error: err.message });
+  }
+}
+
+// ──────────────────────────────────────────────
+// Gemini API Context Synthesis Pipeline
+// ──────────────────────────────────────────────
+async function runGeminiEnhancement(contextId) {
+  try {
+    // 1. Retrieve latest contexts and settings
+    const { contexts = [], geminiApiKey, geminiModel } = await chrome.storage.local.get([
+      'contexts',
+      'geminiApiKey',
+      'geminiModel'
+    ]);
+
+    const contextIndex = contexts.findIndex(c => c.id === contextId);
+    if (contextIndex === -1) return;
+    const context = contexts[contextIndex];
+
+    const apiKey = geminiApiKey;
+    const model = geminiModel || 'gemini-3.5-flash';
+
+    if (!apiKey) {
+      throw new Error('Missing Gemini API Key');
+    }
+
+    // 2. Build the text prompt representing the chat history
+    let promptText = `You are a context handoff agent. Your task is to compress and synthesize the following chat transcript (and any associated images) into a highly efficient handoff context package for another LLM.
+
+Analyze the user's intent, the assistant's responses, the decisions made, code snippets generated, and any visual diagrams or screenshots.
+
+Generate:
+1. A concise title that captures the technical topic (max 6-8 words).
+2. A brief 2-3 sentence summary of the current project/task state.
+3. 3-5 bullet points of key technical decisions, resolved code architecture, and open issues.
+4. An analysis of any provided images/diagrams, explaining what they represent and how they fit into the conversation context.
+5. A highly efficient handoff prompt starting with "[🔄 AI-Enhanced Cross Context Transfer]". This prompt must:
+   - Synthesize the conversation so the next LLM knows the exact state, codebase, and variables.
+   - Describe what is shown in any uploaded images/diagrams so the next LLM has visual awareness.
+   - Ask the next LLM to confirm receipt of context and prompt the user for the next action. Do NOT re-introduce itself.
+
+Here is the conversation history:
+`;
+
+    context.messages.forEach(msg => {
+      const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
+      promptText += `\n[${roleLabel}]:\n${msg.content}\n`;
+    });
+
+    const parts = [{ text: promptText }];
+
+    // 3. Extract and parse images from messages
+    let hasImages = false;
+    context.messages.forEach(msg => {
+      if (msg.images && Array.isArray(msg.images)) {
+        msg.images.forEach(dataUrl => {
+          const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            hasImages = true;
+            parts.push({
+              inlineData: {
+                mimeType: match[1],
+                data: match[2]
+              }
+            });
+          }
+        });
+      }
+    });
+
+    // 4. Call Google AI Studio Gemini API
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING" },
+              summary: { type: "STRING" },
+              keyPoints: { type: "ARRAY", items: { type: "STRING" } },
+              visualAnalysis: { type: "STRING" },
+              handoffPrompt: { type: "STRING" }
+            },
+            required: ["title", "summary", "keyPoints", "handoffPrompt"]
+          }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini API Error: HTTP ${response.status} - ${errText}`);
+    }
+
+    const resJson = await response.json();
+    const textResult = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResult) {
+      throw new Error('Empty response received from Gemini API');
+    }
+
+    const parsedResult = JSON.parse(textResult);
+
+    // 5. Save updated context back to storage
+    const latest = await chrome.storage.local.get('contexts');
+    const updatedContexts = latest.contexts || [];
+    const idx = updatedContexts.findIndex(c => c.id === contextId);
+    if (idx !== -1) {
+      updatedContexts[idx].aiStatus = 'success';
+      updatedContexts[idx].title = parsedResult.title || updatedContexts[idx].title;
+      updatedContexts[idx].aiEnhanced = {
+        summary: parsedResult.summary,
+        keyPoints: parsedResult.keyPoints,
+        visualAnalysis: parsedResult.visualAnalysis || '',
+        handoffPrompt: parsedResult.handoffPrompt
+      };
+      await chrome.storage.local.set({ contexts: updatedContexts });
+    }
+
+  } catch (err) {
+    console.error('Cross Context: runGeminiEnhancement error', err);
+    // Mark as failed in storage
+    const latest = await chrome.storage.local.get('contexts');
+    const updatedContexts = latest.contexts || [];
+    const idx = updatedContexts.findIndex(c => c.id === contextId);
+    if (idx !== -1) {
+      updatedContexts[idx].aiStatus = 'failed';
+      updatedContexts[idx].aiError = err.message || 'Gemini processing failed';
+      await chrome.storage.local.set({ contexts: updatedContexts });
+    }
+  }
 }

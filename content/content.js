@@ -180,7 +180,7 @@
     
     all.sort((a, b) => a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
     return all
-      .map(({ el, role }) => ({ role, content: extractFn(el) }))
+      .map(({ el, role }) => ({ role, content: extractFn(el), element: el }))
       .filter(m => m.content.length > 5);
   }
 
@@ -194,7 +194,7 @@
       if (text.length < minLen) return;
       const role = lastRole === 'user' ? 'assistant' : 'user';
       lastRole = role;
-      messages.push({ role, content: text });
+      messages.push({ role, content: text, element: el });
     });
     return messages;
   }
@@ -325,7 +325,7 @@
         const text = getInnerText(child);
         if (text.length > 0) {
           if (role === 'assistant' && text.length < 10) continue;
-          messages.push({ role, content: text });
+          messages.push({ role, content: text, element: child });
           lastRole = role;
         }
       }
@@ -333,6 +333,130 @@
 
     return messages.length > 0 ? messages : null;
   }
+
+  // ──────────────────────────────────────────
+  // Media / Image Capture Helpers
+  // ──────────────────────────────────────────
+
+  async function svgToPngBase64(svgElement) {
+    try {
+      const svgString = new XMLSerializer().serializeToString(svgElement);
+      const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const rect = svgElement.getBoundingClientRect();
+            canvas.width = rect.width || svgElement.clientWidth || 500;
+            canvas.height = rect.height || svgElement.clientHeight || 500;
+            if (canvas.width <= 0) canvas.width = 500;
+            if (canvas.height <= 0) canvas.height = 500;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(url);
+            resolve(canvas.toDataURL('image/png'));
+          } catch (e) {
+            URL.revokeObjectURL(url);
+            resolve(null);
+          }
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve(null);
+        };
+        img.src = url;
+      });
+    } catch (err) {
+      console.warn('Cross Context: svgToPngBase64 failed', err);
+      return null;
+    }
+  }
+
+  async function getBase64FromImageUrl(src) {
+    if (!src) return null;
+    if (src.startsWith('data:')) return src;
+    
+    if (src.startsWith('blob:')) {
+      try {
+        const res = await fetch(src);
+        const blob = await res.blob();
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch (err) {
+        console.warn('Cross Context: Failed to fetch blob image', err);
+        return null;
+      }
+    }
+    
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'FETCH_IMAGE_BASE64', url: src }, (response) => {
+        if (response && response.success) {
+          resolve(response.base64);
+        } else {
+          resolve(null);
+        }
+      });
+    });
+  }
+
+  function getImagesFromElement(el) {
+    const media = [];
+    if (!el) return media;
+    
+    const imgTags = el.querySelectorAll('img');
+    imgTags.forEach(img => {
+      const src = img.src || img.getAttribute('src');
+      if (!src) return;
+      
+      const isAvatar = src.includes('profile') || src.includes('avatar') || img.classList.contains('rounded-sm') || img.classList.contains('rounded-full');
+      const isEmoji = img.classList.contains('emoji') || (img.clientWidth > 0 && img.clientWidth < 25) || (img.clientHeight > 0 && img.clientHeight < 25);
+      
+      if (!isAvatar && !isEmoji) {
+        media.push({ type: 'img', src });
+      }
+    });
+    
+    const svgTags = el.querySelectorAll('svg');
+    svgTags.forEach(svg => {
+      const rect = svg.getBoundingClientRect();
+      const width = rect.width || svg.clientWidth || parseInt(svg.getAttribute('width')) || 0;
+      const height = rect.height || svg.clientHeight || parseInt(svg.getAttribute('height')) || 0;
+      
+      if (width > 35 && height > 35) {
+        media.push({ type: 'svg', element: svg });
+      }
+    });
+    
+    return media;
+  }
+
+  async function processMediaElements(mediaItems, limit = 5) {
+    const base64s = [];
+    const itemsToProcess = mediaItems.slice(0, limit);
+    for (const item of itemsToProcess) {
+      try {
+        if (item.type === 'img') {
+          const b64 = await getBase64FromImageUrl(item.src);
+          if (b64) base64s.push(b64);
+        } else if (item.type === 'svg') {
+          const b64 = await svgToPngBase64(item.element);
+          if (b64) base64s.push(b64);
+        }
+      } catch (err) {
+        console.warn('Cross Context: Failed to process media item', err);
+      }
+    }
+    return base64s;
+  }
+
 
   const SCRAPERS = {
 
@@ -402,7 +526,7 @@
         const msgs = [];
         humanTurns.forEach(humanEl => {
           const userText = getInnerText(humanEl);
-          if (userText.length > 0) msgs.push({ role: 'user', content: userText });
+          if (userText.length > 0) msgs.push({ role: 'user', content: userText, element: humanEl });
 
           let cursor = humanEl;
           let assistantText = '';
@@ -437,7 +561,7 @@
           }
 
           if (assistantText.length > 0) {
-            msgs.push({ role: 'assistant', content: assistantText });
+            msgs.push({ role: 'assistant', content: assistantText, element: cursor || humanEl });
           }
         });
 
@@ -470,7 +594,7 @@
           if (role !== 'user' && role !== 'assistant') return null;
           // Prefer the inner prose/markdown div for cleaner text; fall back to the whole element
           const inner = el.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || el;
-          return { role, content: getInnerText(inner) };
+          return { role, content: getInnerText(inner), element: el };
         }).filter(m => m && m.content.length > 3);
         if (hasBothRoles(msgs)) {
           return { messages: deduplicate(msgs), title: chatTitle() };
@@ -493,7 +617,7 @@
             textEl = art.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || roleEl;
           }
           const content = getInnerText(textEl);
-          return content.length > 3 ? [{ role, content }] : [];
+          return content.length > 3 ? [{ role, content, element: art }] : [];
         });
         if (hasBothRoles(msgs)) {
           return { messages: deduplicate(msgs), title: chatTitle() };
@@ -512,7 +636,7 @@
             ? (art.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || art)
             : art;
           const content = getInnerText(inner);
-          return content.length > 5 ? [{ role, content }] : [];
+          return content.length > 5 ? [{ role, content, element: art }] : [];
         });
         if (hasBothRoles(msgs)) {
           return { messages: deduplicate(msgs), title: chatTitle() };
@@ -596,6 +720,7 @@
         const msgs = roleEls.map(el => ({
           role: (el.getAttribute('data-role') || el.getAttribute('data-message-role')) === 'user' ? 'user' : 'assistant',
           content: getInnerText(el),
+          element: el
         })).filter(m => m.content.length > 5);
         if (hasBothRoles(msgs)) {
           return { messages: deduplicate(msgs), title: grokTitle() };
@@ -647,8 +772,8 @@
         threadItems.forEach(item => {
           const q = item.querySelector('[class*="query"], [class*="Query"], h2, h3');
           const a = item.querySelector('[class*="prose"], [class*="answer"], [class*="markdown"]');
-          if (q) { const t = getInnerText(q); if (t.length > 3) msgs.push({ role: 'user', content: t }); }
-          if (a) { const t = getInnerText(a); if (t.length > 3) msgs.push({ role: 'assistant', content: t }); }
+          if (q) { const t = getInnerText(q); if (t.length > 3) msgs.push({ role: 'user', content: t, element: q }); }
+          if (a) { const t = getInnerText(a); if (t.length > 3) msgs.push({ role: 'assistant', content: t, element: a }); }
         });
         if (hasBothRoles(msgs)) {
           return { messages: deduplicate(msgs), title: pxTitle() };
@@ -2163,6 +2288,29 @@ Please confirm you have the full context above and are ready to continue the con
             sendResponse({ success: false, error: 'No conversation found. Make sure you have an active conversation open on this page.' });
             return;
           }
+
+          // Process media elements if AI-Driven scrape is requested
+          if (message.isAiScrape) {
+            let totalImages = 0;
+            for (const msg of messages) {
+              if (msg.element && totalImages < 5) {
+                const mediaItems = getImagesFromElement(msg.element);
+                if (mediaItems.length > 0) {
+                  const remainingLimit = 5 - totalImages;
+                  const imagesBase64 = await processMediaElements(mediaItems, remainingLimit);
+                  if (imagesBase64.length > 0) {
+                    msg.images = imagesBase64;
+                    totalImages += imagesBase64.length;
+                  }
+                }
+              }
+            }
+          }
+
+          // Clean up DOM references so they can be JSON-serialized
+          messages.forEach(msg => {
+            delete msg.element;
+          });
           
           // Wait 2 seconds to slow down the scraping feel and let the user appreciate the animation
           await sleep(2000);
