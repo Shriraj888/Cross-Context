@@ -2,6 +2,11 @@
 // Handles messaging between popup and content scripts
 
 const MAX_SAVED_CONTEXTS = 10;
+const MAX_IMAGE_FETCH_BYTES = 2 * 1024 * 1024;
+const IMAGE_FETCH_TIMEOUT_MS = 12000;
+const MAX_GEMINI_MESSAGES = 60;
+const MAX_GEMINI_PROMPT_CHARS = 60000;
+const MAX_GEMINI_IMAGES = 5;
 
 // ──────────────────────────────────────────────
 // Message Router
@@ -212,7 +217,7 @@ async function handleScrapeRequest(message, sendResponse) {
   } catch (err) {
     sendResponse({
       success: false,
-      error: 'Could not reach page. Try refreshing the LLM tab, then capture again. (' + err.message + ')'
+      error: 'Could not reach page. Try refreshing the LLM tab, then scrape again. (' + err.message + ')'
     });
   }
 }
@@ -237,25 +242,53 @@ function generateTitle(context) {
 // Image Fetcher & Bypass CORS
 // ──────────────────────────────────────────────
 async function handleFetchImageBase64(url, sendResponse) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
+
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      cache: 'force-cache'
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType && !contentType.toLowerCase().startsWith('image/')) {
+      throw new Error('URL did not return an image');
+    }
+
+    const contentLength = Number(res.headers.get('content-length') || 0);
+    if (contentLength > MAX_IMAGE_FETCH_BYTES) {
+      throw new Error('Image is too large to attach');
+    }
+
     const blob = await res.blob();
+    if (blob.size > MAX_IMAGE_FETCH_BYTES) {
+      throw new Error('Image is too large to attach');
+    }
+
     const mimeType = blob.type || 'image/png';
     const arrayBuffer = await blob.arrayBuffer();
-    
-    let binary = '';
-    const bytes = new Uint8Array(arrayBuffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    const base64Data = btoa(binary);
+    const base64Data = arrayBufferToBase64(arrayBuffer);
     sendResponse({ success: true, base64: `data:${mimeType};base64,${base64Data}` });
   } catch (err) {
     console.error('Cross Context: Fetch image failed', url, err);
-    sendResponse({ success: false, error: err.message });
+    sendResponse({ success: false, error: err.name === 'AbortError' ? 'Image fetch timed out' : err.message });
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+function arrayBufferToBase64(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+
+  return btoa(binary);
 }
 
 // ──────────────────────────────────────────────
@@ -299,21 +332,30 @@ Generate:
 Here is the conversation history:
 `;
 
-    context.messages.forEach(msg => {
+    context.messages.slice(-MAX_GEMINI_MESSAGES).some(msg => {
       const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
-      promptText += `\n[${roleLabel}]:\n${msg.content}\n`;
+      const line = `\n[${roleLabel}]:\n${String(msg.content || '')}\n`;
+      if (promptText.length + line.length > MAX_GEMINI_PROMPT_CHARS) {
+        promptText += '\n[Transcript truncated to keep AI compression fast.]';
+        return true;
+      }
+      promptText += line;
+      return false;
     });
 
     const parts = [{ text: promptText }];
 
-    // 3. Extract and parse images from messages
-    let hasImages = false;
+    // 3. Extract and parse a small set of unique images from messages
+    const seenImages = new Set();
+    let imageCount = 0;
     context.messages.forEach(msg => {
       if (msg.images && Array.isArray(msg.images)) {
         msg.images.forEach(dataUrl => {
+          if (imageCount >= MAX_GEMINI_IMAGES || seenImages.has(dataUrl)) return;
           const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
           if (match) {
-            hasImages = true;
+            seenImages.add(dataUrl);
+            imageCount++;
             parts.push({
               inlineData: {
                 mimeType: match[1],

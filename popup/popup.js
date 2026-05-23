@@ -205,7 +205,7 @@ async function detectCurrentTab() {
       }
     }
 
-    currentPlatformLabel.textContent = 'Open an AI chat to capture context';
+    currentPlatformLabel.textContent = 'Open an AI chat to scrape context';
     platformDot.className = 'platform-dot';
     platformDot.innerHTML = '';
     platformDot.style.color = '';
@@ -595,7 +595,7 @@ async function captureConversation(isAiScrape) {
         if (m.images) imgCount += m.images.length;
       });
 
-      let toastMsg = `✓ ${platformName}: ${userCount} user + ${assistantCount} assistant turns captured`;
+      let toastMsg = `✓ ${platformName}: ${userCount} user + ${assistantCount} assistant turns scraped`;
       if (imgCount > 0) {
         toastMsg += ` with ${imgCount} diagram/image(s)`;
       }
@@ -912,7 +912,7 @@ function setupTabListeners() {
   });
 
   tabRawTranscript.addEventListener('click', () => {
-    currentPreviewTab = 'raw-transcript';
+    currentPreviewTab = 'scraped-data';
     const ctx = savedContexts.find(c => c.id === currentPreviewId);
     if (ctx) renderPreviewContent(ctx);
   });
@@ -1020,9 +1020,29 @@ const PLATFORM_NAMES = {
 };
 
 function formatContextPrompt(context) {
-  // If the context has been successfully enhanced by Gemini AI, use it directly
-  if (context.aiEnhanced && context.aiEnhanced.handoffPrompt) {
-    return context.aiEnhanced.handoffPrompt;
+  // If the context has been successfully enhanced by Gemini AI, use the structured handoff package
+  if (context.aiEnhanced && context.aiStatus === 'success') {
+    const src = PLATFORM_NAMES[context.platform] || context.platform;
+    const summary = context.aiEnhanced.summary || '';
+    const keyPoints = Array.isArray(context.aiEnhanced.keyPoints)
+      ? context.aiEnhanced.keyPoints.map(pt => `• ${pt}`).join('\n')
+      : '';
+    const visual = context.aiEnhanced.visualAnalysis ? `\n🎨 Visuals/Diagrams/Layout Analysis:\n${context.aiEnhanced.visualAnalysis}\n` : '';
+    const handoff = context.aiEnhanced.handoffPrompt || '';
+
+    return `[🔄 AI-Enhanced Cross Context Transfer]
+You are continuing a conversation that was started on ${src}.
+The conversation history has been processed, verified, and summarized by Gemini AI.
+
+📋 AI Synthesized Summary:
+${summary}
+
+🔑 Key Technical Points:
+${keyPoints}
+${visual}
+${'═'.repeat(60)}
+🚀 Optimized Handoff Prompt & Instructions:
+${handoff}`;
   }
 
   const MAX_TURNS  = 40;

@@ -11,6 +11,30 @@ const CHAR_LIMIT = 80000; // ~20k tokens safety limit
  * @returns {string} formatted prompt
  */
 export function formatContextPrompt(context, targetPlatform) {
+  if (context.aiEnhanced && context.aiStatus === 'success') {
+    const src = getPlatformDisplayName(context.platform);
+    const summary = context.aiEnhanced.summary || '';
+    const keyPoints = Array.isArray(context.aiEnhanced.keyPoints)
+      ? context.aiEnhanced.keyPoints.map(pt => `• ${pt}`).join('\n')
+      : '';
+    const visual = context.aiEnhanced.visualAnalysis ? `\n🎨 Visuals/Diagrams/Layout Analysis:\n${context.aiEnhanced.visualAnalysis}\n` : '';
+    const handoff = context.aiEnhanced.handoffPrompt || '';
+
+    return `[🔄 AI-Enhanced Cross Context Transfer]
+You are continuing a conversation that was started on ${src}.
+The conversation history has been processed, verified, and summarized by Gemini AI.
+
+📋 AI Synthesized Summary:
+${summary}
+
+🔑 Key Technical Points:
+${keyPoints}
+${visual}
+${'═'.repeat(60)}
+🚀 Optimized Handoff Prompt & Instructions:
+${handoff}`;
+  }
+
   let messages = [...context.messages];
   let truncated = false;
 

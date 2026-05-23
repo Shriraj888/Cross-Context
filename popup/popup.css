@@ -1148,6 +1148,9 @@ body {
 }
 
 .btn-capture.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
   box-shadow: 0 6px 18px rgba(124, 58, 237, 0.45), 0 0 8px rgba(219, 39, 119, 0.25);
   transform: translateY(-1px);
   filter: brightness(1.05);
@@ -1592,5 +1595,9 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-hover);
+}
+
+.hidden {
+  display: none !important;
 }
 

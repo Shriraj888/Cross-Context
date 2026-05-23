@@ -6,9 +6,9 @@ A browser extension that allows you to seamlessly share conversation history and
 
 ## ✨ Features
 
-- **One-Click Scrape:** Capture conversation transcripts from Claude, ChatGPT, Gemini, Grok, or Perplexity.
-- **Context Injection:** Seamlessly paste and format the captured conversation history directly into the text input area of a new target LLM.
-- **Local Storage:** All captured conversations are saved locally in your browser's local extension storage.
+- **One-Click Scrape:** Scrape conversation transcripts from Claude, ChatGPT, Gemini, Grok, or Perplexity.
+- **Context Injection:** Seamlessly paste and format the scraped conversation history directly into the text input area of a new target LLM.
+- **Local Storage:** All scraped conversations are saved locally in your browser's local extension storage.
 - **Privacy First:** 100% self-contained. No server-side storage, no database, and no telemetry. All context processing is handled entirely on your device.
 
 ---

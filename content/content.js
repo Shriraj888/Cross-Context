@@ -25,6 +25,11 @@
   const platform = detectPlatform();
   if (!platform) return;
 
+  const AI_MEDIA_LIMIT = 5;
+  const AI_MEDIA_CONCURRENCY = 3;
+  const AI_MEDIA_MAX_DIMENSION = 1024;
+  const AI_MEDIA_JPEG_QUALITY = 0.82;
+
   // Idempotent listener registration: remove old listener before adding new one.
   // This handles extension reloads — Chrome removes content scripts but keeps
   // window vars, so a window-flag guard would block fresh re-injection.
@@ -39,6 +44,7 @@
 
   let isSessionActive = false;
   let tempStyle = null;
+  let activeScrapeTextCache = null;
 
   function startScrapingSession() {
     if (isSessionActive) return;
@@ -98,10 +104,14 @@
   // while avoiding the layout thrashing caused by repeatedly cloning and appending elements.
   function getInnerText(el) {
     if (!el) return '';
+    if (activeScrapeTextCache?.has(el)) {
+      return activeScrapeTextCache.get(el);
+    }
     const wasActive = isSessionActive;
     if (!wasActive) startScrapingSession();
     const text = (el.innerText || el.textContent || '').trim();
     if (!wasActive) endScrapingSession();
+    activeScrapeTextCache?.set(el, text);
     return text;
   }
 
@@ -350,13 +360,14 @@
           try {
             const canvas = document.createElement('canvas');
             const rect = svgElement.getBoundingClientRect();
-            canvas.width = rect.width || svgElement.clientWidth || 500;
-            canvas.height = rect.height || svgElement.clientHeight || 500;
-            if (canvas.width <= 0) canvas.width = 500;
-            if (canvas.height <= 0) canvas.height = 500;
+            const rawWidth = rect.width || svgElement.clientWidth || parseInt(svgElement.getAttribute('width')) || 500;
+            const rawHeight = rect.height || svgElement.clientHeight || parseInt(svgElement.getAttribute('height')) || 500;
+            const scale = Math.min(1, AI_MEDIA_MAX_DIMENSION / Math.max(rawWidth, rawHeight));
+            canvas.width = Math.max(1, Math.round(rawWidth * scale));
+            canvas.height = Math.max(1, Math.round(rawHeight * scale));
             
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             URL.revokeObjectURL(url);
             resolve(canvas.toDataURL('image/png'));
           } catch (e) {
@@ -376,20 +387,69 @@
     }
   }
 
+  function readBlobAsDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function optimizeImageDataUrl(dataUrl) {
+    if (!dataUrl || !dataUrl.startsWith('data:image/')) return dataUrl || null;
+    if (dataUrl.startsWith('data:image/svg')) return dataUrl;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const width = img.naturalWidth || img.width;
+          const height = img.naturalHeight || img.height;
+          if (!width || !height) {
+            resolve(dataUrl);
+            return;
+          }
+
+          const shouldCompress = Math.max(width, height) > AI_MEDIA_MAX_DIMENSION || dataUrl.length > 750000;
+          if (!shouldCompress) {
+            resolve(dataUrl);
+            return;
+          }
+
+          const scale = Math.min(1, AI_MEDIA_MAX_DIMENSION / Math.max(width, height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(width * scale));
+          canvas.height = Math.max(1, Math.round(height * scale));
+
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', AI_MEDIA_JPEG_QUALITY));
+        } catch (_) {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+  }
+
+  async function optimizeBlobImage(blob) {
+    const dataUrl = await readBlobAsDataUrl(blob);
+    return optimizeImageDataUrl(dataUrl);
+  }
+
   async function getBase64FromImageUrl(src) {
     if (!src) return null;
-    if (src.startsWith('data:')) return src;
+    if (src.startsWith('data:')) return optimizeImageDataUrl(src);
     
     if (src.startsWith('blob:')) {
       try {
         const res = await fetch(src);
         const blob = await res.blob();
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
+        return optimizeBlobImage(blob);
       } catch (err) {
         console.warn('Cross Context: Failed to fetch blob image', err);
         return null;
@@ -398,8 +458,12 @@
     
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: 'FETCH_IMAGE_BASE64', url: src }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
         if (response && response.success) {
-          resolve(response.base64);
+          optimizeImageDataUrl(response.base64).then(resolve);
         } else {
           resolve(null);
         }
@@ -439,22 +503,65 @@
   }
 
   async function processMediaElements(mediaItems, limit = 5) {
-    const base64s = [];
     const itemsToProcess = mediaItems.slice(0, limit);
-    for (const item of itemsToProcess) {
+    const base64s = await mapWithConcurrency(itemsToProcess, AI_MEDIA_CONCURRENCY, async (item) => {
       try {
         if (item.type === 'img') {
-          const b64 = await getBase64FromImageUrl(item.src);
-          if (b64) base64s.push(b64);
+          return await getBase64FromImageUrl(item.src);
         } else if (item.type === 'svg') {
-          const b64 = await svgToPngBase64(item.element);
-          if (b64) base64s.push(b64);
+          return await svgToPngBase64(item.element);
         }
       } catch (err) {
         console.warn('Cross Context: Failed to process media item', err);
       }
-    }
+      return null;
+    });
     return base64s;
+  }
+
+  async function mapWithConcurrency(items, limit, mapper) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(limit, items.length);
+
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex++;
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    }));
+
+    return results;
+  }
+
+  async function attachMediaToMessages(messages, limit = AI_MEDIA_LIMIT) {
+    const mediaItems = [];
+    const seen = new Set();
+
+    for (const msg of messages) {
+      if (!msg.element || mediaItems.length >= limit) continue;
+
+      const items = getImagesFromElement(msg.element);
+      for (const item of items) {
+        const key = item.type === 'img' ? `img:${item.src}` : item.element;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        mediaItems.push({ ...item, message: msg });
+        if (mediaItems.length >= limit) break;
+      }
+    }
+
+    const processed = await processMediaElements(mediaItems, limit);
+    let attachedCount = 0;
+    processed.forEach((dataUrl, index) => {
+      const msg = mediaItems[index]?.message;
+      if (!msg || !dataUrl) return;
+      if (!msg.images) msg.images = [];
+      msg.images.push(dataUrl);
+      attachedCount++;
+    });
+
+    return attachedCount;
   }
 
 
@@ -1328,9 +1435,9 @@
     const steps = [
       'Detecting active platform...',
       'Locating message containers...',
-      'Extracting conversation turns...',
+      'Scraping conversation turns...',
       'Formatting context payload...',
-      'Context captured successfully!'
+      'Context scraped successfully!'
     ];
     
     steps.forEach((stepText, idx) => {
@@ -1490,6 +1597,30 @@
   };
 
   function formatContextPrompt(context, targetPlatform) {
+    if (context.aiEnhanced && context.aiStatus === 'success') {
+      const src = PLATFORM_NAMES[context.platform] || context.platform;
+      const summary = context.aiEnhanced.summary || '';
+      const keyPoints = Array.isArray(context.aiEnhanced.keyPoints)
+        ? context.aiEnhanced.keyPoints.map(pt => `• ${pt}`).join('\n')
+        : '';
+      const visual = context.aiEnhanced.visualAnalysis ? `\n🎨 Visuals/Diagrams/Layout Analysis:\n${context.aiEnhanced.visualAnalysis}\n` : '';
+      const handoff = context.aiEnhanced.handoffPrompt || '';
+
+      return `[🔄 AI-Enhanced Cross Context Transfer]
+You are continuing a conversation that was started on ${src}.
+The conversation history has been processed, verified, and summarized by Gemini AI.
+
+📋 AI Synthesized Summary:
+${summary}
+
+🔑 Key Technical Points:
+${keyPoints}
+${visual}
+${'═'.repeat(60)}
+🚀 Optimized Handoff Prompt & Instructions:
+${handoff}`;
+    }
+
     const MAX_TURNS  = 40;
     const CHAR_LIMIT = 80000;
 
@@ -2275,6 +2406,7 @@ Please confirm you have the full context above and are ready to continue the con
       const anim = runScrapeAnimation();
       (async () => {
         try {
+          activeScrapeTextCache = new WeakMap();
           startScrapingSession();
           const scraper = SCRAPERS[platform];
           if (!scraper) {
@@ -2291,20 +2423,7 @@ Please confirm you have the full context above and are ready to continue the con
 
           // Process media elements if AI-Driven scrape is requested
           if (message.isAiScrape) {
-            let totalImages = 0;
-            for (const msg of messages) {
-              if (msg.element && totalImages < 5) {
-                const mediaItems = getImagesFromElement(msg.element);
-                if (mediaItems.length > 0) {
-                  const remainingLimit = 5 - totalImages;
-                  const imagesBase64 = await processMediaElements(mediaItems, remainingLimit);
-                  if (imagesBase64.length > 0) {
-                    msg.images = imagesBase64;
-                    totalImages += imagesBase64.length;
-                  }
-                }
-              }
-            }
+            await attachMediaToMessages(messages, AI_MEDIA_LIMIT);
           }
 
           // Clean up DOM references so they can be JSON-serialized
@@ -2312,9 +2431,6 @@ Please confirm you have the full context above and are ready to continue the con
             delete msg.element;
           });
           
-          // Wait 2 seconds to slow down the scraping feel and let the user appreciate the animation
-          await sleep(2000);
-
           anim.success();
           sendResponse({
             success: true,
@@ -2324,6 +2440,7 @@ Please confirm you have the full context above and are ready to continue the con
           anim.fail(err.message || 'Scrape failed');
           sendResponse({ success: false, error: 'Scrape error: ' + err.message });
         } finally {
+          activeScrapeTextCache = null;
           endScrapingSession();
         }
       })();

@@ -57,7 +57,7 @@
         </div>
       </div>
       <div class="capture-buttons-container">
-        <button id="btn-capture" class="btn-capture btn-secondary" title="Capture conversation text directly (Fast & Local)" disabled>
+        <button id="btn-capture" class="btn-capture btn-secondary" title="Scrape Text — fast local scraping of conversation text" disabled>
           <svg class="btn-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
@@ -65,14 +65,14 @@
             <line x1="16" y1="17" x2="8" y2="17"/>
             <polyline points="10 9 9 9 8 9"/>
           </svg>
-          <span>Standard Capture</span>
+          <span>Scrape Text</span>
         </button>
-        <button id="btn-capture-ai" class="btn-capture btn-primary" title="Scrape conversation text + diagrams and optimize using Gemini AI" disabled>
+        <button id="btn-capture-ai" class="btn-capture btn-primary" title="AI Scrape — scrape text &amp; visuals, optimized by Gemini AI" disabled>
           <svg class="btn-icon sparkle-svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9.813 15.904L9 21l-.813-5.096A4.5 4.5 0 0 0 4.904 12.63L0 11.813l5.096-.813A4.5 4.5 0 0 0 8.37 7.704L9 2l.813 5.096a4.5 4.5 0 0 0 3.283 3.113L18.188 11l-5.096.813a4.5 4.5 0 0 0-3.279 4.091z"/>
             <path d="M20 18v2m0 2v-2m2-2h-2m-2 0h2m-1-11V5m0 2v-2m2-2h-2m-2 0h2"/>
           </svg>
-          <span>AI-Enhanced</span>
+          <span>AI Scrape</span>
         </button>
       </div>
     </div>
@@ -112,7 +112,7 @@
       <div class="empty-state" id="empty-state">
         <div class="empty-icon">💬</div>
         <p class="empty-title">No saved contexts yet</p>
-        <p class="empty-sub">Open an LLM conversation and click<br>a capture option above.</p>
+        <p class="empty-sub">Open an LLM conversation and click<br>a scraping option above.</p>
       </div>
     </div>
   </section>
@@ -136,7 +136,7 @@
       <!-- Tab Navigation (shown only for AI-Enhanced contexts) -->
       <div id="preview-tabs" class="preview-tabs hidden">
         <button id="tab-ai-summary" class="tab-btn active">✨ AI Summary</button>
-        <button id="tab-raw-transcript" class="tab-btn">💬 Raw History</button>
+        <button id="tab-raw-transcript" class="tab-btn">📋 Scraped Data</button>
       </div>
 
       <div id="preview-content-ai" class="preview-content-ai hidden">
@@ -186,7 +186,7 @@
             <input type="checkbox" id="setting-enable-ai" class="settings-checkbox" checked />
             <label class="settings-label checkbox-label" for="setting-enable-ai">
               <strong>Auto AI-Compress</strong>
-              <span>Always compress and analyze visual assets after capture.</span>
+              <span>Always compress and analyze visual assets after scraping.</span>
             </label>
           </div>
         </div>
@@ -194,7 +194,7 @@
         <div class="settings-info-box">
           ℹ️ <strong>Limit & Storage Notes:</strong>
           <ul>
-            <li>Captures up to 5 images or diagrams (like Mermaid) per session.</li>
+            <li>Scrapes up to 5 images or diagrams (like Mermaid) per session.</li>
             <li>No data leaves your device except requests to Google AI Studio.</li>
             <li>If storage fills up, delete older contexts to free up space.</li>
           </ul>
