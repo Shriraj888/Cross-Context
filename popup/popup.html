@@ -175,7 +175,9 @@
           <label class="settings-label" for="setting-api-key">Gemini API Key (Google AI Studio)</label>
           <div class="input-password-wrapper">
             <input type="password" id="setting-api-key" placeholder="AI Studio API Key..." class="settings-input" />
-            <button id="btn-toggle-api-key" class="password-toggle-btn" type="button" title="Toggle Visibility">👁️</button>
+            <button id="btn-toggle-api-key" class="password-toggle-btn" type="button" title="Toggle Visibility">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
           </div>
           <span class="settings-hint">Get a free key from <a href="https://aistudio.google.com/" target="_blank" rel="noopener">Google AI Studio</a>.</span>
         </div>
@@ -192,11 +194,14 @@
         </div>
 
         <div class="settings-group">
-          <div class="toggle-wrapper">
-            <input type="checkbox" id="setting-enable-ai" class="settings-checkbox" checked />
-            <label class="settings-label checkbox-label" for="setting-enable-ai">
-              <strong>Auto AI-Compress</strong>
-              <span>Always compress and analyze visual assets after scraping.</span>
+          <div class="toggle-container">
+            <div class="toggle-info">
+              <strong class="toggle-title">Auto AI-Compress</strong>
+              <span class="toggle-desc">Always compress and analyze visual assets after scraping.</span>
+            </div>
+            <label class="switch-control" for="setting-enable-ai">
+              <input type="checkbox" id="setting-enable-ai" class="switch-checkbox" checked />
+              <span class="switch-slider"></span>
             </label>
           </div>
         </div>

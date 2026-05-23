@@ -925,7 +925,22 @@
   }
 
   function insertTextProgrammatically(el, text) {
+    try {
+      el.click();
+    } catch (_) {}
     el.focus();
+    el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+
+    // Let rich text frameworks (like Lexical, Draft.js, ProseMirror) intercept the input
+    try {
+      el.dispatchEvent(new InputEvent('beforeinput', {
+        inputType: 'insertText',
+        data: text,
+        bubbles: true,
+        cancelable: true
+      }));
+    } catch (_) {}
+
     if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
       el.select();
       const success = document.execCommand('insertText', false, text);
@@ -946,6 +961,15 @@
         dispatchInputEvents(el);
       }
     }
+
+    // Trigger post-input react state bindings
+    try {
+      el.dispatchEvent(new InputEvent('input', {
+        inputType: 'insertText',
+        data: text,
+        bubbles: true
+      }));
+    } catch (_) {}
   }
 
   function trySubmit(inputEl, submitSelectors) {
@@ -973,55 +997,55 @@
 
     async claude(prompt) {
       const el = await waitForElement(
-        'div.ProseMirror[contenteditable="true"], [contenteditable="true"][data-placeholder], [data-testid="compose-input"] [contenteditable]'
+        'div.ProseMirror[contenteditable="true"], [contenteditable="true"][data-placeholder], [data-testid="compose-input"] [contenteditable], [contenteditable="true"], textarea'
       );
       if (!el) return { success: false, error: 'Claude input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1200);
-      trySubmit(el, 'button[aria-label*="Send"], button[data-testid*="send"]');
+      await sleep(1500);
+      trySubmit(el, 'button[aria-label*="Send"], button[data-testid*="send"], button[aria-label="Send Message"], button[class*="send"]');
       return { success: true };
     },
 
     async chatgpt(prompt) {
       const el = await waitForElement(
-        '#prompt-textarea, div[contenteditable="true"].ProseMirror, textarea[placeholder]'
+        '#prompt-textarea, div[contenteditable="true"].ProseMirror, textarea[placeholder], [contenteditable="true"]'
       );
       if (!el) return { success: false, error: 'ChatGPT input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1200);
-      trySubmit(el, '[data-testid="send-button"], button[aria-label="Send message"], button[aria-label="Send prompt"]');
+      await sleep(1500);
+      trySubmit(el, '[data-testid="send-button"], button[aria-label="Send message"], button[aria-label="Send prompt"], button[data-testid*="send"], button[class*="send"]');
       return { success: true };
     },
 
     async gemini(prompt) {
       const el = await waitForElement(
-        'rich-textarea [contenteditable="true"], .ql-editor[contenteditable="true"], div[contenteditable="true"][data-placeholder]'
+        'rich-textarea [contenteditable="true"], .ql-editor[contenteditable="true"], div[contenteditable="true"][data-placeholder], [contenteditable="true"]'
       );
       if (!el) return { success: false, error: 'Gemini input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1200);
-      trySubmit(el, 'button.send-button, button[aria-label*="Send"], button[mattooltip*="Send"]');
+      await sleep(1500);
+      trySubmit(el, 'button.send-button, button[aria-label*="Send"], button[mattooltip*="Send"], button[class*="send"]');
       return { success: true };
     },
 
     async grok(prompt) {
       const el = await waitForElement(
-        'textarea[placeholder*="Ask"], textarea[placeholder*="Grok"], textarea[class*="input"], [contenteditable="true"]'
+        'textarea[placeholder*="Ask"], textarea[placeholder*="Grok"], textarea[class*="input"], [contenteditable="true"], textarea'
       );
       if (!el) return { success: false, error: 'Grok input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1200);
-      trySubmit(el, 'button[aria-label*="Send"], button[type="submit"]');
+      await sleep(1500);
+      trySubmit(el, 'button[aria-label*="Send"], button[type="submit"], button[data-testid*="send"], button[class*="send"]');
       return { success: true };
     },
 
     async perplexity(prompt) {
       const el = await waitForElement(
-        'textarea[placeholder*="Ask"], textarea[placeholder*="Search"], textarea[class*="textarea"]'
+        'textarea[placeholder*="Ask"], textarea[placeholder*="Search"], textarea[class*="textarea"], textarea, [contenteditable="true"]'
       );
       if (!el) return { success: false, error: 'Perplexity input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1200);
+      await sleep(1500);
       trySubmit(el, 'button[aria-label*="Submit"], button[type="submit"], button[class*="send"]');
       return { success: true };
     },

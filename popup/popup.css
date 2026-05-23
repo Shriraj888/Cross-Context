@@ -898,10 +898,10 @@ body {
 }
 
 .quick-inject-btn {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.02);
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none !important;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -909,87 +909,60 @@ body {
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   font-family: inherit;
   flex-shrink: 0;
+  padding: 0;
+  box-shadow: none !important;
 }
 
 .quick-inject-btn svg {
   margin: 0 !important;
-  transition: transform 0.2s ease;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .quick-inject-btn:hover svg {
-  transform: scale(1.1);
+  transform: scale(1.15);
 }
 
 .quick-inject-btn.target-claude {
   color: var(--claude);
-  border: 1px solid rgba(217, 119, 82, 0.25);
 }
 .quick-inject-btn.target-claude:hover {
-  background: rgba(217, 119, 82, 0.15);
-  border-color: var(--claude);
-  box-shadow: 0 0 8px rgba(217, 119, 82, 0.4);
+  background: transparent;
+  filter: drop-shadow(0 0 6px rgba(217, 119, 82, 0.65));
 }
 
 .quick-inject-btn.target-chatgpt {
   color: var(--chatgpt);
-  border: 1px solid rgba(16, 185, 129, 0.25);
 }
 .quick-inject-btn.target-chatgpt:hover {
-  background: rgba(16, 185, 129, 0.15);
-  border-color: var(--chatgpt);
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  background: transparent;
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.65));
 }
 
 .quick-inject-btn.target-gemini {
   color: var(--gemini);
-  border: 1px solid rgba(59, 130, 246, 0.25);
 }
 .quick-inject-btn.target-gemini:hover {
-  background: rgba(59, 130, 246, 0.15);
-  border-color: var(--gemini);
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+  background: transparent;
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.65));
 }
 
 .quick-inject-btn.target-grok {
   color: var(--text-primary);
-  border: 1px solid rgba(244, 244, 245, 0.2);
 }
 .quick-inject-btn.target-grok:hover {
-  background: rgba(244, 244, 245, 0.1);
-  border-color: var(--text-primary);
-  box-shadow: 0 0 8px rgba(244, 244, 245, 0.3);
+  background: transparent;
+  filter: drop-shadow(0 0 6px rgba(244, 244, 245, 0.5));
 }
 
 .quick-inject-btn.target-perplexity {
   color: var(--perplexity);
-  border: 1px solid rgba(14, 165, 233, 0.25);
 }
 .quick-inject-btn.target-perplexity:hover {
-  background: rgba(14, 165, 233, 0.15);
-  border-color: var(--perplexity);
-  box-shadow: 0 0 8px rgba(14, 165, 233, 0.4);
+  background: transparent;
+  filter: drop-shadow(0 0 6px rgba(14, 165, 233, 0.65));
 }
 
 /* ── Drag & Drop Utilities ────────────────── */
-.drag-handle {
-  color: var(--text-muted);
-  cursor: grab;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 3px;
-  transition: var(--transition);
-  border-radius: 50%;
-  background: rgba(255,255,255,0.01);
-}
-
-.context-card:hover .drag-handle {
-  color: var(--text-secondary);
-}
-
-.drag-handle:active {
-  cursor: grabbing;
-}
 
 .context-card.dragging {
   opacity: 0.3;
@@ -1182,49 +1155,57 @@ body {
 .settings-content {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   padding: 8px 4px 16px;
 }
 
 .settings-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .settings-label {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-secondary);
+  letter-spacing: 0.75px;
+  color: var(--accent-light);
+  opacity: 0.95;
 }
 
 .settings-input {
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
   font-size: 12px;
   outline: none;
-  transition: var(--transition);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   width: 100%;
   box-sizing: border-box;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.12);
 }
 
 .settings-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  border-color: rgba(124, 58, 237, 0.5);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.12), 0 0 12px rgba(124, 58, 237, 0.25);
 }
 
 .settings-select {
   cursor: pointer;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 32px;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+
+.settings-select option {
+  background-color: #161622; /* Matches dark theme popup base */
+  color: #f3f4f6;            /* Light theme text */
 }
 
 .input-password-wrapper {
@@ -1234,107 +1215,221 @@ body {
 
 .password-toggle-btn {
   position: absolute;
-  right: 10px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
   background: transparent;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px;
+  padding: 6px;
+  transition: color 0.2s ease, transform 0.2s ease;
+  border-radius: 4px;
 }
 
 .password-toggle-btn:hover {
   color: var(--text-primary);
+  transform: translateY(-50%) scale(1.08);
 }
 
 .settings-hint {
   font-size: 10px;
   color: var(--text-muted);
+  margin-top: -2px;
 }
 
 .settings-hint a {
   color: var(--accent-light);
   text-decoration: none;
+  font-weight: 500;
 }
 
 .settings-hint a:hover {
   text-decoration: underline;
+  color: #ffffff;
 }
 
-.toggle-wrapper {
+/* Redesigned Premium Switch Toggle */
+.toggle-container {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  cursor: pointer;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-sizing: border-box;
+  transition: all 0.25s ease;
 }
 
-.settings-checkbox {
-  margin-top: 4px;
-  accent-color: var(--accent);
-  cursor: pointer;
+.toggle-container:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
-.checkbox-label {
+.toggle-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  text-transform: none;
-  letter-spacing: normal;
-  cursor: pointer;
+  flex: 1;
+  min-width: 0;
 }
 
-.checkbox-label strong {
+.toggle-title {
   font-size: 12px;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
-.checkbox-label span {
-  font-size: 11px;
+.toggle-desc {
+  font-size: 10.5px;
   color: var(--text-muted);
+  line-height: 1.35;
 }
 
+.switch-control {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.switch-checkbox {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 34px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.switch-slider::before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #a1a1aa;
+  border-radius: 50%;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+.switch-checkbox:checked + .switch-slider {
+  background-color: rgba(124, 58, 237, 0.25);
+  border-color: rgba(124, 58, 237, 0.4);
+}
+
+.switch-checkbox:checked + .switch-slider::before {
+  transform: translateX(16px);
+  background-color: #a78bfa;
+  box-shadow: 0 2px 6px rgba(124, 58, 237, 0.45);
+}
+
+/* Redesigned Premium Info Box */
 .settings-info-box {
-  background: rgba(217, 119, 6, 0.02);
-  border: 1px dashed rgba(217, 119, 6, 0.15);
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
+  background: rgba(124, 58, 237, 0.03);
+  border-left: 3px solid #7c3aed;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  padding: 12px 14px;
   font-size: 11px;
   color: var(--text-secondary);
-  line-height: 1.45;
+  line-height: 1.5;
+}
+
+.settings-info-box strong {
+  color: var(--text-primary);
+  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
 }
 
 .settings-info-box ul {
-  padding-left: 16px;
-  margin-top: 4px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .settings-info-box li {
-  margin-bottom: 2px;
+  position: relative;
+  padding-left: 14px;
   color: var(--text-secondary);
 }
 
+.settings-info-box li::before {
+  content: "✦";
+  position: absolute;
+  left: 0;
+  top: 0px;
+  color: #a78bfa;
+  font-size: 9px;
+  opacity: 0.85;
+}
+
+/* Save Settings Button - Redesigned to fit new aesthetics */
 .btn-save-settings {
-  background: var(--text-primary);
-  color: var(--bg-base);
-  border: 1px solid var(--text-primary);
-  padding: 10px;
-  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 11px;
+  border-radius: var(--radius-lg);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: var(--transition);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   text-align: center;
   font-family: inherit;
-  margin-top: 4px;
+  margin-top: 6px;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+  position: relative;
+  overflow: hidden;
 }
 
 .btn-save-settings:hover {
-  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.45), 0 0 8px rgba(219, 39, 119, 0.25);
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.btn-save-settings:active {
+  transform: translateY(0);
+}
+
+/* Shine effect on hover */
+.btn-save-settings::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
+}
+
+.btn-save-settings:hover::after {
+  transform: translateX(100%);
 }
 
 /* ── AI Enhanced Badges ───────────────────── */
