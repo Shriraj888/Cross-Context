@@ -754,7 +754,7 @@ function renderPreviewContent(ctx) {
           <div class="ai-image-gallery">
             ${allImages.map(imgSrc => `
               <div class="ai-image-thumbnail">
-                <img src="${imgSrc}" alt="Scraped context asset" />
+                <img src="${escapeHtml(imgSrc)}" alt="Scraped context asset" />
               </div>
             `).join('')}
           </div>
@@ -868,7 +868,7 @@ function renderPreviewContent(ctx) {
         <div class="ai-image-gallery" style="margin-top: 8px;">
           ${msg.images.map(imgSrc => `
             <div class="ai-image-thumbnail">
-              <img src="${imgSrc}" alt="Scraped conversation diagram" />
+              <img src="${escapeHtml(imgSrc)}" alt="Scraped conversation diagram" />
             </div>
           `).join('')}
         </div>
@@ -896,7 +896,7 @@ function renderPreviewContent(ctx) {
 function openFullscreenImage(src) {
   const viewer = document.createElement('div');
   viewer.className = 'fullscreen-image-overlay';
-  viewer.innerHTML = `<img src="${src}" alt="Zoomed view of diagram" />`;
+  viewer.innerHTML = `<img src="${escapeHtml(src)}" alt="Zoomed view of diagram" />`;
   viewer.addEventListener('click', () => {
     viewer.remove();
   });
