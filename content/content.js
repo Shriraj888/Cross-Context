@@ -2018,23 +2018,43 @@
   function formatContextPrompt(context, targetPlatform) {
     if (context.aiEnhanced && context.aiStatus === 'success') {
       const src = PLATFORM_NAMES[context.platform] || context.platform;
-      const summary = context.aiEnhanced.summary || '';
-      const keyPoints = Array.isArray(context.aiEnhanced.keyPoints)
-        ? context.aiEnhanced.keyPoints.map(pt => `• ${pt}`).join('\n')
+      const e = context.aiEnhanced;
+      const summary = e.project_summary || '';
+      const task = e.current_task || '';
+      const intent = e.user_intent || '';
+      const tech = Array.isArray(e.technical_stack) ? e.technical_stack.join(', ') : '';
+      const decisions = Array.isArray(e.architecture_decisions)
+        ? e.architecture_decisions.map(pt => `• ${pt}`).join('\n')
         : '';
-      const visual = context.aiEnhanced.visualAnalysis ? `\n🎨 Visuals/Diagrams/Layout Analysis:\n${context.aiEnhanced.visualAnalysis}\n` : '';
-      const handoff = context.aiEnhanced.handoffPrompt || '';
+      const constraints = Array.isArray(e.constraints) ? e.constraints.join(', ') : '';
+      const files = Array.isArray(e.files_mentioned) ? e.files_mentioned.join(', ') : '';
+      const pending = Array.isArray(e.pending_tasks) ? e.pending_tasks.map(pt => `• ${pt}`).join('\n') : '';
+      const handoff = e.handoffPrompt || '';
 
       return `[🔄 AI-Enhanced Cross Context Transfer]
 You are continuing a conversation that was started on ${src}.
-The conversation history has been processed, verified, and summarized by Gemini AI.
+The conversation history has been processed, verified, and distilled by the Advanced AI Context Intelligence Engine.
 
-📋 AI Synthesized Summary:
+📋 Project Summary:
 ${summary}
 
-🔑 Key Technical Points:
-${keyPoints}
-${visual}
+🎯 Current Task & Intent:
+- Task: ${task}
+- Intent: ${intent}
+
+💻 Tech Stack & Active Files:
+- Stack: ${tech}
+- Files: ${files}
+
+🔑 Architecture Decisions:
+${decisions}
+
+⚠️ Constraints & Limits:
+${constraints}
+
+📋 Pending Tasks:
+${pending}
+
 ${'═'.repeat(60)}
 🚀 Optimized Handoff Prompt & Instructions:
 ${handoff}`;

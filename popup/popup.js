@@ -736,10 +736,44 @@ function renderPreviewContent(ctx) {
   if (isAiEnhanced) {
     previewTabs.classList.remove('hidden');
 
-    // Create AI summary tab layout
+    const e = ctx.aiEnhanced;
+
+    // Build lists helper
+    const buildChips = (arr) => {
+      if (!arr || !arr.length) return `<span class="ai-no-data">None detected</span>`;
+      return `<div class="ai-tag-group">${arr.map(item => `<span class="ai-tag-chip">${escapeHtml(item)}</span>`).join('')}</div>`;
+    };
+
+    const buildBulletList = (arr) => {
+      if (!arr || !arr.length) return `<span class="ai-no-data">None detected</span>`;
+      return `<ul class="ai-bullet-list">${arr.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+    };
+
+    const buildCodeSnippets = (arr) => {
+      if (!arr || !arr.length) return '';
+      return `
+        <div class="ai-section">
+          <span class="ai-section-title">Key Code & Configurations</span>
+          <div class="ai-code-wrapper-group">
+            ${arr.map((code, idx) => `
+              <div class="ai-code-block-item">
+                <div class="ai-code-block-header">
+                  <span>Snippet #${idx + 1}</span>
+                  <button class="ai-code-copy-btn" data-code="${escapeHtml(code)}" title="Copy code snippet">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Copy
+                  </button>
+                </div>
+                <pre class="ai-code-pre"><code>${escapeHtml(code)}</code></pre>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    };
+
+    // Gather scraped image attachments
     let imagesGalleryHtml = '';
-    
-    // Gather all images from all message turns
     const allImages = [];
     ctx.messages.forEach(msg => {
       if (msg.images && Array.isArray(msg.images)) {
@@ -750,7 +784,7 @@ function renderPreviewContent(ctx) {
     if (allImages.length > 0) {
       imagesGalleryHtml = `
         <div class="ai-section">
-          <span class="ai-section-title">Scraped Diagrams & Images (${allImages.length}/5)</span>
+          <span class="ai-section-title">Scraped Media Assets (${allImages.length}/5)</span>
           <div class="ai-image-gallery">
             ${allImages.map(imgSrc => `
               <div class="ai-image-thumbnail">
@@ -762,35 +796,88 @@ function renderPreviewContent(ctx) {
       `;
     }
 
-    let visualAnalysisHtml = '';
-    if (ctx.aiEnhanced.visualAnalysis) {
-      visualAnalysisHtml = `
-        <div class="ai-section">
-          <span class="ai-section-title">Visual Layout Description</span>
-          <div class="ai-summary-text">${escapeHtml(ctx.aiEnhanced.visualAnalysis)}</div>
-        </div>
-      `;
-    }
+    // Prepare token reduction metadata
+    const tr = e.token_reduction_summary || { estimated_original_tokens: 0, estimated_compressed_tokens: 0, reduction_percentage: 0 };
+    const score = e.context_confidence_score || 0;
 
     previewContentAi.innerHTML = `
-      <div class="ai-section">
-        <span class="ai-section-title">AI Synthesized Summary</span>
-        <div class="ai-summary-text">${escapeHtml(ctx.aiEnhanced.summary)}</div>
+      <!-- Token Compression Panel -->
+      <div class="ai-compression-card">
+        <div class="ai-compression-stat">
+          <span class="ai-compression-label">Compression</span>
+          <span class="ai-compression-value">${tr.reduction_percentage ? tr.reduction_percentage.toFixed(1) : '0.0'}%</span>
+        </div>
+        <div class="ai-compression-divider"></div>
+        <div class="ai-compression-stat">
+          <span class="ai-compression-label">Confidence</span>
+          <span class="ai-compression-value">${score}%</span>
+        </div>
+        <div class="ai-compression-divider"></div>
+        <div class="ai-compression-stat">
+          <span class="ai-compression-label">Compressed Size</span>
+          <span class="ai-compression-value">${tr.estimated_compressed_tokens ? tr.estimated_compressed_tokens : '0'} tkn</span>
+        </div>
       </div>
 
       <div class="ai-section">
-        <span class="ai-section-title">Key Technical Points</span>
-        <ul class="ai-bullet-list">
-          ${ctx.aiEnhanced.keyPoints.map(pt => `<li>${escapeHtml(pt)}</li>`).join('')}
-        </ul>
+        <span class="ai-section-title">Project Summary</span>
+        <div class="ai-summary-text">${escapeHtml(e.project_summary || 'No project summary generated.')}</div>
       </div>
 
-      ${visualAnalysisHtml}
+      <div class="ai-grid-two-col">
+        <div class="ai-section">
+          <span class="ai-section-title">Current Task State</span>
+          <div class="ai-summary-text mini-text">${escapeHtml(e.current_task || 'No active task detected.')}</div>
+        </div>
+        <div class="ai-section">
+          <span class="ai-section-title">User Intent</span>
+          <div class="ai-summary-text mini-text">${escapeHtml(e.user_intent || 'No specific intent outlined.')}</div>
+        </div>
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">Technical Architecture & Stack</span>
+        ${buildChips(e.technical_stack)}
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">Core Architecture Decisions</span>
+        ${buildBulletList(e.architecture_decisions)}
+      </div>
+
+      <div class="ai-grid-two-col">
+        <div class="ai-section">
+          <span class="ai-section-title">Constraints & Limits</span>
+          ${buildChips(e.constraints)}
+        </div>
+        <div class="ai-section">
+          <span class="ai-section-title">Active Files</span>
+          ${buildChips(e.files_mentioned)}
+        </div>
+      </div>
+
+      ${buildCodeSnippets(e.important_code_snippets)}
+
+      <div class="ai-section">
+        <span class="ai-section-title">Errors & Attempted Solves</span>
+        ${buildBulletList(e.errors_and_issues)}
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">Pending Action Items</span>
+        ${buildBulletList(e.pending_tasks)}
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">AI Inferred Intelligence Layer</span>
+        ${buildBulletList(e.ai_inferred_context)}
+      </div>
+
       ${imagesGalleryHtml}
 
       <div class="ai-section ai-prompt-box-wrapper">
         <span class="ai-section-title">Optimized Handoff Prompt</span>
-        <div class="ai-prompt-box">${escapeHtml(ctx.aiEnhanced.handoffPrompt)}</div>
+        <div class="ai-prompt-box">${escapeHtml(e.handoffPrompt)}</div>
         <button id="btn-copy-ai-prompt" class="btn-copy-ai-prompt">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -818,10 +905,21 @@ function renderPreviewContent(ctx) {
     const copyBtn = previewContentAi.querySelector('#btn-copy-ai-prompt');
     if (copyBtn) {
       copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(ctx.aiEnhanced.handoffPrompt);
+        navigator.clipboard.writeText(e.handoffPrompt);
         showToast('✓ Handoff prompt copied!', 'success');
       });
     }
+
+    // Attach snippets copy click
+    const snippetCopyBtns = previewContentAi.querySelectorAll('.ai-code-copy-btn');
+    snippetCopyBtns.forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const codeText = btn.dataset.code;
+        navigator.clipboard.writeText(codeText);
+        showToast('✓ Code snippet copied!', 'success');
+      });
+    });
 
     // Attach full-screen thumbnail zoom viewer click
     const thumbs = previewContentAi.querySelectorAll('.ai-image-thumbnail img');
@@ -1115,23 +1213,43 @@ function formatContextPrompt(context) {
   // If the context has been successfully enhanced by Gemini AI, use the structured handoff package
   if (context.aiEnhanced && context.aiStatus === 'success') {
     const src = PLATFORM_NAMES[context.platform] || context.platform;
-    const summary = context.aiEnhanced.summary || '';
-    const keyPoints = Array.isArray(context.aiEnhanced.keyPoints)
-      ? context.aiEnhanced.keyPoints.map(pt => `• ${pt}`).join('\n')
+    const e = context.aiEnhanced;
+    const summary = e.project_summary || '';
+    const task = e.current_task || '';
+    const intent = e.user_intent || '';
+    const tech = Array.isArray(e.technical_stack) ? e.technical_stack.join(', ') : '';
+    const decisions = Array.isArray(e.architecture_decisions)
+      ? e.architecture_decisions.map(pt => `• ${pt}`).join('\n')
       : '';
-    const visual = context.aiEnhanced.visualAnalysis ? `\n🎨 Visuals/Diagrams/Layout Analysis:\n${context.aiEnhanced.visualAnalysis}\n` : '';
-    const handoff = context.aiEnhanced.handoffPrompt || '';
+    const constraints = Array.isArray(e.constraints) ? e.constraints.join(', ') : '';
+    const files = Array.isArray(e.files_mentioned) ? e.files_mentioned.join(', ') : '';
+    const pending = Array.isArray(e.pending_tasks) ? e.pending_tasks.map(pt => `• ${pt}`).join('\n') : '';
+    const handoff = e.handoffPrompt || '';
 
     return `[🔄 AI-Enhanced Cross Context Transfer]
 You are continuing a conversation that was started on ${src}.
-The conversation history has been processed, verified, and summarized by Gemini AI.
+The conversation history has been processed, verified, and distilled by the Advanced AI Context Intelligence Engine.
 
-📋 AI Synthesized Summary:
+📋 Project Summary:
 ${summary}
 
-🔑 Key Technical Points:
-${keyPoints}
-${visual}
+🎯 Current Task & Intent:
+- Task: ${task}
+- Intent: ${intent}
+
+💻 Tech Stack & Active Files:
+- Stack: ${tech}
+- Files: ${files}
+
+🔑 Architecture Decisions:
+${decisions}
+
+⚠️ Constraints & Limits:
+${constraints}
+
+📋 Pending Tasks:
+${pending}
+
 ${'═'.repeat(60)}
 🚀 Optimized Handoff Prompt & Instructions:
 ${handoff}`;

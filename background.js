@@ -326,16 +326,60 @@ async function runGeminiEnhancement(contextId) {
     }
 
     // 2. Build the text prompt representing the chat history
-    let promptText = `You are a context handoff agent. Your task is to compress and synthesize the following chat transcript (and any associated images) into a highly efficient handoff context package for another LLM.
+    let promptText = `You are an advanced AI Context Intelligence Engine.
 
-Analyze the user's intent, the assistant's responses, the decisions made, code snippets generated, and any visual diagrams or screenshots.
+Your task is NOT to summarize the conversation normally.
 
-Generate:
-1. A concise title that captures the technical topic (max 6-8 words).
-2. A brief 2-3 sentence summary of the current project/task state.
-3. 3-5 bullet points of key technical decisions, resolved code architecture, and open issues.
-4. An analysis of any provided images/diagrams, explaining what they represent and how they fit into the conversation context.
-5. A highly efficient handoff prompt starting with "[🔄 AI-Enhanced Cross Context Transfer]". This prompt must:
+Your goal is to DISTILL the conversation into a highly reusable, token-efficient, structured context object that can be transferred across LLMs (ChatGPT, Claude, Gemini, Perplexity, etc.).
+
+Analyze the entire conversation and extract ONLY high-value information.
+
+Ignore:
+- greetings
+- filler text
+- repeated explanations
+- conversational fluff
+- redundant confirmations
+
+Focus on preserving:
+- project understanding
+- user intent
+- technical decisions
+- architecture
+- unresolved problems
+- active tasks
+- constraints
+- important code
+- debugging context
+- preferences
+
+Rules:
+1. Keep outputs concise but information-dense.
+2. Remove duplicated information.
+3. Merge semantically similar points.
+4. Preserve technical accuracy.
+5. Mark inferred information clearly under "ai_inferred_context".
+6. Preserve chronological decisions when important.
+7. Prioritize unresolved issues and active work.
+8. Prefer bullet-style short entries over paragraphs.
+9. Maintain cross-LLM compatibility.
+10. Output ONLY valid JSON.
+
+Additional Intelligence Layer:
+- Detect project type automatically.
+- Detect whether the user is coding, debugging, researching, brainstorming, or planning.
+- Identify reusable long-term memory.
+- Extract important developer preferences.
+- Detect blockers and unresolved dependencies.
+- Infer missing but highly probable context when confidence is high.
+
+Compression Objective:
+Maximize information retention while minimizing token usage.
+
+Handoff & Visual Additions:
+In addition to the distillation fields, you must generate:
+1. "title": a very concise summary (max 6-8 words) of the conversation context to serve as the saved context card title.
+2. "handoffPrompt": a highly efficient handoff prompt starting with "[🔄 AI-Enhanced Cross Context Transfer]". This prompt must:
    - Synthesize the conversation so the next LLM knows the exact state, codebase, and variables.
    - Describe what is shown in any uploaded images/diagrams so the next LLM has visual awareness.
    - Ask the next LLM to confirm receipt of context and prompt the user for the next action. Do NOT re-introduce itself.
@@ -393,12 +437,60 @@ Here is the conversation history:
             type: "OBJECT",
             properties: {
               title: { type: "STRING" },
-              summary: { type: "STRING" },
-              keyPoints: { type: "ARRAY", items: { type: "STRING" } },
-              visualAnalysis: { type: "STRING" },
-              handoffPrompt: { type: "STRING" }
+              handoffPrompt: { type: "STRING" },
+              project_summary: { type: "STRING" },
+              current_task: { type: "STRING" },
+              user_intent: { type: "STRING" },
+              important_context: { type: "ARRAY", items: { type: "STRING" } },
+              technical_stack: { type: "ARRAY", items: { type: "STRING" } },
+              architecture_decisions: { type: "ARRAY", items: { type: "STRING" } },
+              constraints: { type: "ARRAY", items: { type: "STRING" } },
+              files_mentioned: { type: "ARRAY", items: { type: "STRING" } },
+              important_code_snippets: { type: "ARRAY", items: { type: "STRING" } },
+              errors_and_issues: { type: "ARRAY", items: { type: "STRING" } },
+              attempted_solutions: { type: "ARRAY", items: { type: "STRING" } },
+              successful_solutions: { type: "ARRAY", items: { type: "STRING" } },
+              pending_tasks: { type: "ARRAY", items: { type: "STRING" } },
+              conversation_topics: { type: "ARRAY", items: { type: "STRING" } },
+              user_preferences: { type: "ARRAY", items: { type: "STRING" } },
+              priority_context: { type: "ARRAY", items: { type: "STRING" } },
+              low_priority_context: { type: "ARRAY", items: { type: "STRING" } },
+              ai_inferred_context: { type: "ARRAY", items: { type: "STRING" } },
+              context_confidence_score: { type: "INTEGER" },
+              token_reduction_summary: {
+                type: "OBJECT",
+                properties: {
+                  estimated_original_tokens: { type: "INTEGER" },
+                  estimated_compressed_tokens: { type: "INTEGER" },
+                  reduction_percentage: { type: "NUMBER" }
+                },
+                required: ["estimated_original_tokens", "estimated_compressed_tokens", "reduction_percentage"]
+              }
             },
-            required: ["title", "summary", "keyPoints", "handoffPrompt"]
+            required: [
+              "title",
+              "handoffPrompt",
+              "project_summary",
+              "current_task",
+              "user_intent",
+              "important_context",
+              "technical_stack",
+              "architecture_decisions",
+              "constraints",
+              "files_mentioned",
+              "important_code_snippets",
+              "errors_and_issues",
+              "attempted_solutions",
+              "successful_solutions",
+              "pending_tasks",
+              "conversation_topics",
+              "user_preferences",
+              "priority_context",
+              "low_priority_context",
+              "ai_inferred_context",
+              "context_confidence_score",
+              "token_reduction_summary"
+            ]
           }
         }
       })
@@ -425,10 +517,33 @@ Here is the conversation history:
       updatedContexts[idx].aiStatus = 'success';
       updatedContexts[idx].title = parsedResult.title || updatedContexts[idx].title;
       updatedContexts[idx].aiEnhanced = {
-        summary: parsedResult.summary,
-        keyPoints: parsedResult.keyPoints,
-        visualAnalysis: parsedResult.visualAnalysis || '',
-        handoffPrompt: parsedResult.handoffPrompt
+        // Base mapping to keep old simple visual interfaces safe
+        summary: parsedResult.project_summary || '',
+        keyPoints: parsedResult.architecture_decisions || parsedResult.important_context || [],
+        visualAnalysis: '',
+        handoffPrompt: parsedResult.handoffPrompt,
+
+        // Full advanced structured memory
+        project_summary: parsedResult.project_summary,
+        current_task: parsedResult.current_task,
+        user_intent: parsedResult.user_intent,
+        important_context: parsedResult.important_context,
+        technical_stack: parsedResult.technical_stack,
+        architecture_decisions: parsedResult.architecture_decisions,
+        constraints: parsedResult.constraints,
+        files_mentioned: parsedResult.files_mentioned,
+        important_code_snippets: parsedResult.important_code_snippets,
+        errors_and_issues: parsedResult.errors_and_issues,
+        attempted_solutions: parsedResult.attempted_solutions,
+        successful_solutions: parsedResult.successful_solutions,
+        pending_tasks: parsedResult.pending_tasks,
+        conversation_topics: parsedResult.conversation_topics,
+        user_preferences: parsedResult.user_preferences,
+        priority_context: parsedResult.priority_context,
+        low_priority_context: parsedResult.low_priority_context,
+        ai_inferred_context: parsedResult.ai_inferred_context,
+        context_confidence_score: parsedResult.context_confidence_score,
+        token_reduction_summary: parsedResult.token_reduction_summary
       };
       await chrome.storage.local.set({ contexts: updatedContexts });
     }
