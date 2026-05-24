@@ -784,10 +784,8 @@
    * This handles lazy-loading / virtualization, and visually demonstrates complete scraping to the user.
    */
   async function scrollToLoadAll(chatContainer, maxScrollTime = 8000) {
-    if (!chatContainer) return false;
-
-    // Find the scrollable ancestor
-    const scrollEl = findScrollableAncestor(chatContainer);
+    // Find the actual scrollable viewport or inner container using our advanced heuristic
+    const scrollEl = findActualScrollContainer(chatContainer);
     if (!scrollEl) return false;
 
     const startTime = Date.now();
@@ -840,6 +838,7 @@
    * Finds the nearest scrollable ancestor of an element.
    */
   function findScrollableAncestor(el) {
+    if (!el) return null;
     let curr = el;
     while (curr && curr !== document.body && curr !== document.documentElement) {
       const style = window.getComputedStyle(curr);
@@ -850,8 +849,54 @@
       curr = curr.parentElement;
     }
     // Fallback to the element itself if it has scroll
-    if (el.scrollHeight > el.clientHeight) return el;
+    if (el && el.scrollHeight > el.clientHeight) return el;
     return null;
+  }
+
+  /**
+   * Locates the actual scrollable container of a chat thread by running multiple heuristics.
+   * This ensures virtualization scrolls work flawlessly on Claude, Gemini, Perplexity, Grok, and ChatGPT.
+   */
+  function findActualScrollContainer(chatRoot) {
+    // 1. Find any message container or tweet row on page and search UP for its scroll ancestor
+    const msgSelector = 'article, [data-message-author-role], [data-message-id], .user-message, .assistant-message, [class*="message-bubble"], [class*="Messagebubble"], [class*="message-row"], [class*="chat-turn"], [class*="bubble"], [class*="Message"], [data-testid="tweet"]';
+    
+    const rootEl = chatRoot || document.body;
+    const msgEl = rootEl.querySelector(msgSelector) || document.querySelector(msgSelector);
+    if (msgEl) {
+      const scrollEl = findScrollableAncestor(msgEl);
+      if (scrollEl) return scrollEl;
+    }
+
+    // 2. Search UP or DOWN from the selected chatRoot container
+    if (chatRoot) {
+      const scrollEl = findScrollableAncestor(chatRoot);
+      if (scrollEl) return scrollEl;
+      
+      const allChildren = chatRoot.querySelectorAll('*');
+      for (const child of allChildren) {
+        const style = window.getComputedStyle(child);
+        const overflowY = style.overflowY;
+        if ((overflowY === 'auto' || overflowY === 'scroll') && child.scrollHeight > child.clientHeight) {
+          return child;
+        }
+      }
+    }
+
+    // 3. Search DOWN from body for any element with overflow scrolling (excluding overlay host)
+    const allBodyChildren = document.body.querySelectorAll('*');
+    for (const child of allBodyChildren) {
+      if (child.id === '__cross-context-host' || child.closest('#__cross-context-host')) continue;
+      
+      const style = window.getComputedStyle(child);
+      const overflowY = style.overflowY;
+      if ((overflowY === 'auto' || overflowY === 'scroll') && child.scrollHeight > child.clientHeight) {
+        return child;
+      }
+    }
+
+    // 4. Default to standard scrolling element for the document window viewport
+    return document.scrollingElement || document.documentElement || document.body;
   }
 
   // ── Component 6: Shadow DOM Traversal ──
@@ -2836,10 +2881,8 @@ Please confirm you have the full context above and are ready to continue the con
           const chatRoot = document.querySelector(
             'main, [role="main"], [role="log"], [class*="conversation"], [class*="chat-window"]'
           );
-          if (chatRoot) {
-            anim.setState('locating');
-            await scrollToLoadAll(chatRoot);
-          }
+          anim.setState('locating');
+          await scrollToLoadAll(chatRoot);
 
           anim.setState('scraping');
           const scraper = SCRAPERS[platform];
