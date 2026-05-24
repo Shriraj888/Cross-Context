@@ -33,7 +33,6 @@ function startScrapingSession() {
       .cc-scraping-active div.action-area,
       .cc-scraping-active .message-actions,
       .cc-scraping-active .response-actions,
-      .cc-scraping-active .claude-actions,
       .cc-scraping-active [class*="action-buttons"],
       .cc-scraping-active [class*="citation"],
       .cc-scraping-active [class*="source"],
@@ -63,10 +62,6 @@ function getInnerText(el) {
   const text = (el.innerText || el.textContent || '').trim();
   if (!wasActive) endScrapingSession();
   return text;
-}
-
-function extractText(el) {
-  return getInnerText(el);
 }
 
 function filterInputArea(el) {
@@ -110,175 +105,36 @@ function deduplicate(messages) {
   });
 }
 
-function filterTopLevelOnly(elements) {
-  const set = new Set(elements);
-  return elements.filter(el => {
-    let parent = el.parentElement;
-    while (parent) {
-      if (set.has(parent)) {
-        return false;
-      }
-      parent = parent.parentElement;
-    }
-    return true;
-  });
-}
-
-function interleaveByDomOrder(userEls, assistantEls, extractFn = getInnerText) {
-  const combinedEls = [...userEls, ...assistantEls];
-  const topLevel = filterTopLevelOnly(combinedEls);
-  
-  const all = topLevel.map(el => {
-    const isUser = userEls.includes(el);
-    return { el, role: isUser ? 'user' : 'assistant' };
-  });
-  
-  all.sort((a, b) => a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
-  return all
-    .map(({ el, role }) => ({ role, content: extractFn(el) }))
-    .filter(m => m.content.length > 5);
-}
-
-function universalFallback(containerSelector, minLen = 20) {
-  const messages = [];
-  const blocks = document.querySelectorAll(containerSelector);
-  let lastRole = null;
-  blocks.forEach(el => {
-    const text = getInnerText(el);
-    if (text.length < minLen) return;
-    const role = lastRole === 'user' ? 'assistant' : 'user';
-    lastRole = role;
-    messages.push({ role, content: text });
-  });
-  return messages;
-}
-
-function findLCA(elements) {
-  if (elements.length === 0) return null;
-  if (elements.length === 1) return elements[0].parentElement;
-  
-  let lca = elements[0].parentElement;
-  while (lca) {
-    const containsAll = elements.every(el => lca.contains(el));
-    if (containsAll) {
-      return lca;
-    }
-    lca = lca.parentElement;
+/**
+ * Determine the role of a DOM element by walking up through its ancestors
+ * looking for the closest data-message-author-role attribute.
+ */
+function getRoleFromAncestor(el) {
+  let cur = el;
+  while (cur && cur !== document.body) {
+    const role = cur.getAttribute('data-message-author-role');
+    if (role === 'user' || role === 'assistant') return role;
+    cur = cur.parentElement;
   }
   return null;
 }
 
-function extractConversationViaLCA(userSelectors, assistantSelectors, copyButtonSelectors) {
-  let userEls = [...document.querySelectorAll(userSelectors)].filter(filterInputArea);
-  let assistantEls = assistantSelectors ? [...document.querySelectorAll(assistantSelectors)].filter(filterInputArea) : [];
-  let copyBtns = copyButtonSelectors ? [...document.querySelectorAll(copyButtonSelectors)].filter(filterInputArea) : [];
-
-  // Exclude assistant elements that are actually inside user elements
-  assistantEls = assistantEls.filter(el => !userEls.some(userEl => userEl.contains(el)));
-
-  if (userEls.length === 0) return null;
-
-  let chatContainer = null;
-  let curr = userEls[0];
-  while (curr && curr !== document.body && curr !== document.documentElement) {
-    const parent = curr.parentElement;
-    if (!parent) break;
-    
-    const containsAllUsers = userEls.every(el => parent.contains(el));
-    if (containsAllUsers) {
-      let hasUserTurn = false;
-      let hasAssistantTurn = false;
-      
-      for (const child of parent.children) {
-        const containsAnyUser = userEls.some(el => child.contains(el));
-        if (containsAnyUser) {
-          hasUserTurn = true;
-        } else {
-          const text = getInnerText(child);
-          if (text.length > 20) {
-            hasAssistantTurn = true;
-          }
-        }
-      }
-      
-      if (hasUserTurn && hasAssistantTurn) {
-        chatContainer = parent;
-        break;
-      }
-    }
-    curr = parent;
+/**
+ * Extract text content from a message container, preferring the inner
+ * markdown/prose element for assistant messages for cleaner output.
+ */
+function extractMessageText(container, role) {
+  if (role === 'assistant') {
+    // For assistant messages, prefer the markdown-rendered content
+    const inner = container.querySelector('.markdown, [class*="prose"], [class*="markdown"]');
+    if (inner) return getInnerText(inner);
   }
-
-  if (!chatContainer) {
-    const allIndicators = [...userEls, ...assistantEls, ...copyBtns];
-    chatContainer = findLCA(allIndicators);
+  if (role === 'user') {
+    // For user messages, prefer the whitespace-pre-wrap div (plain text prompt)
+    const inner = container.querySelector('.whitespace-pre-wrap, [class*="whitespace-pre-wrap"]');
+    if (inner) return getInnerText(inner);
   }
-
-  if (!chatContainer || chatContainer === document.body || chatContainer === document.documentElement) return null;
-
-  while (chatContainer && chatContainer.children.length === 1 && !userEls.some(el => chatContainer === el)) {
-    chatContainer = chatContainer.children[0];
-  }
-
-  const userTurns = new Set();
-  const assistantTurns = new Set();
-
-  userEls.forEach(el => {
-    let curr = el;
-    while (curr && curr.parentElement !== chatContainer) {
-      curr = curr.parentElement;
-    }
-    if (curr) userTurns.add(curr);
-  });
-
-  assistantEls.forEach(el => {
-    let curr = el;
-    while (curr && curr.parentElement !== chatContainer) {
-      curr = curr.parentElement;
-    }
-    if (curr) assistantTurns.add(curr);
-  });
-
-  copyBtns.forEach(btn => {
-    let curr = btn;
-    while (curr && curr.parentElement !== chatContainer) {
-      curr = curr.parentElement;
-    }
-    if (curr) assistantTurns.add(curr);
-  });
-
-  const messages = [];
-  let lastRole = null;
-
-  for (const child of chatContainer.children) {
-    const isUser = userTurns.has(child);
-    const isAssistant = assistantTurns.has(child);
-
-    let role = null;
-    if (isUser && !isAssistant) {
-      role = 'user';
-    } else if (isAssistant && !isUser) {
-      role = 'assistant';
-    } else if (isUser && isAssistant) {
-      role = 'assistant';
-    } else {
-      const text = getInnerText(child);
-      if (text.length > 10) {
-        role = lastRole === 'user' ? 'assistant' : 'user';
-      }
-    }
-
-    if (role) {
-      const text = getInnerText(child);
-      if (text.length > 0) {
-        if (role === 'assistant' && text.length < 10) continue;
-        messages.push({ role, content: text });
-        lastRole = role;
-      }
-    }
-  }
-
-  return messages.length > 0 ? messages : null;
+  return getInnerText(container);
 }
 
 export function scrapeConversation() {
@@ -288,19 +144,22 @@ export function scrapeConversation() {
     const chatTitle = () =>
       document.title.replace(/[-–|]?\s*ChatGPT.*$/i, '').trim() || 'ChatGPT Conversation';
 
-    // ── Strategy 1: Direct data-message-author-role attribute (most reliable) ──
-    // ChatGPT tags every message container with data-message-author-role="user"|"assistant".
-    // This is the MOST accurate approach — read the role straight from the attribute.
+    // ══════════════════════════════════════════════════════════════════════
+    // Strategy 1: Direct data-message-author-role attribute (MOST RELIABLE)
+    // ══════════════════════════════════════════════════════════════════════
+    // ChatGPT marks every message container with data-message-author-role="user"|"assistant".
+    // Read the role straight from the attribute — no guessing needed.
     const roleEls = [...document.querySelectorAll('[data-message-author-role]')].filter(filterInputArea);
     if (roleEls.length > 0) {
-      const msgs = roleEls.map(el => {
+      const msgs = [];
+      for (const el of roleEls) {
         const role = el.getAttribute('data-message-author-role');
-        // Only accept 'user' or 'assistant' roles — skip system/tool messages
-        if (role !== 'user' && role !== 'assistant') return null;
-        // Prefer the inner prose/markdown div for cleaner text; fall back to the whole element
-        const inner = el.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || el;
-        return { role, content: getInnerText(inner) };
-      }).filter(m => m && m.content.length > 3);
+        if (role !== 'user' && role !== 'assistant') continue;
+        const content = extractMessageText(el, role);
+        if (content.length > 3) {
+          msgs.push({ role, content });
+        }
+      }
       if (hasBothRoles(msgs)) {
         return {
           success: true,
@@ -314,22 +173,26 @@ export function scrapeConversation() {
       }
     }
 
-    // ── Strategy 2: article elements with embedded role attribute ──
-    // Each ChatGPT message turn is wrapped in an <article>. Find the role indicator inside.
-    const articles = [...document.querySelectorAll('article[data-testid*="conversation-turn"]')].filter(filterInputArea);
+    // ══════════════════════════════════════════════════════════════════════
+    // Strategy 2: Article-based conversation turns
+    // ══════════════════════════════════════════════════════════════════════
+    // ChatGPT wraps each turn in <article data-testid="conversation-turn-N">.
+    // Inside each article, find the role attribute and extract text.
+    const articles = [...document.querySelectorAll('article')].filter(filterInputArea);
     if (articles.length > 0) {
-      const msgs = articles.flatMap(art => {
+      const msgs = [];
+      for (const art of articles) {
+        // Look for role indicator inside the article
         const roleEl = art.querySelector('[data-message-author-role]');
-        if (!roleEl) return [];
-        const role = roleEl.getAttribute('data-message-author-role');
-        if (role !== 'user' && role !== 'assistant') return [];
-        let textEl = roleEl;
-        if (role === 'assistant') {
-          textEl = art.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || roleEl;
+        if (roleEl) {
+          const role = roleEl.getAttribute('data-message-author-role');
+          if (role !== 'user' && role !== 'assistant') continue;
+          const content = extractMessageText(art, role);
+          if (content.length > 3) {
+            msgs.push({ role, content });
+          }
         }
-        const content = getInnerText(textEl);
-        return content.length > 3 ? [{ role, content }] : [];
-      });
+      }
       if (hasBothRoles(msgs)) {
         return {
           success: true,
@@ -343,20 +206,45 @@ export function scrapeConversation() {
       }
     }
 
-    // ── Strategy 3: Broader article fallback (no data-testid filter) ──
-    const allArticles = [...document.querySelectorAll('article')].filter(filterInputArea);
-    if (allArticles.length > 0) {
-      const msgs = allArticles.flatMap(art => {
-        const roleEl = art.querySelector('[data-message-author-role]');
-        if (!roleEl) return [];
+    // ══════════════════════════════════════════════════════════════════════
+    // Strategy 3: Walk the main chat container, determine role per child
+    // ══════════════════════════════════════════════════════════════════════
+    // Find the main scrollable chat area and iterate its direct children.
+    // For each child, check if it contains a data-message-author-role attribute.
+    const mainEl = document.querySelector('main') || document.querySelector('[role="main"]');
+    if (mainEl) {
+      // Find the deepest container that holds multiple conversation turn articles/divs
+      let chatContainer = mainEl;
+      const articleInMain = mainEl.querySelectorAll('article, [data-message-author-role]');
+      if (articleInMain.length > 0) {
+        // Find common parent of all articles
+        let lca = articleInMain[0].parentElement;
+        while (lca && lca !== mainEl) {
+          const containsAll = [...articleInMain].every(a => lca.contains(a));
+          if (containsAll && lca.children.length > 1) {
+            chatContainer = lca;
+            break;
+          }
+          lca = lca.parentElement;
+        }
+      }
+
+      const msgs = [];
+      for (const child of chatContainer.children) {
+        // Check for role attribute anywhere inside this child
+        const roleEl = child.querySelector('[data-message-author-role]') ||
+                        (child.hasAttribute('data-message-author-role') ? child : null);
+        if (!roleEl) continue;
+
         const role = roleEl.getAttribute('data-message-author-role');
-        if (role !== 'user' && role !== 'assistant') return [];
-        const inner = (role === 'assistant')
-          ? (art.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || art)
-          : art;
-        const content = getInnerText(inner);
-        return content.length > 5 ? [{ role, content }] : [];
-      });
+        if (role !== 'user' && role !== 'assistant') continue;
+
+        const content = extractMessageText(child, role);
+        if (content.length > 3) {
+          msgs.push({ role, content });
+        }
+      }
+
       if (hasBothRoles(msgs)) {
         return {
           success: true,
@@ -370,26 +258,66 @@ export function scrapeConversation() {
       }
     }
 
-    // ── Strategy 4: LCA-based turn extractor (fallback for changed DOM) ──
-    const lcaMsgs = extractConversationViaLCA(
-      '[data-message-author-role="user"]',
-      '[data-message-author-role="assistant"]',
-      'button[aria-label*="Copy" i], button[data-testid*="copy" i]'
-    );
-    if (lcaMsgs && hasBothRoles(lcaMsgs)) {
-      return {
-        success: true,
-        context: {
-          platform: 'chatgpt',
-          title: chatTitle(),
-          messages: deduplicate(lcaMsgs),
-          url: window.location.href,
-        }
-      };
+    // ══════════════════════════════════════════════════════════════════════
+    // Strategy 4: Heuristic — find user prompts via whitespace-pre-wrap,
+    //             find assistant responses via .markdown/.prose siblings
+    // ══════════════════════════════════════════════════════════════════════
+    // Only reach here if data-message-author-role is completely absent.
+    const allWhitespace = [...document.querySelectorAll('.whitespace-pre-wrap, [class*="whitespace-pre-wrap"]')].filter(filterInputArea);
+    const allMarkdown = [...document.querySelectorAll('.markdown, [class*="prose"]')].filter(filterInputArea);
+
+    // Filter: whitespace-pre-wrap elements that are NOT inside a .markdown or .prose container are user prompts
+    const userBubbles = allWhitespace.filter(el => {
+      return !el.closest('.markdown') && !el.closest('[class*="prose"]') && !el.closest('[class*="markdown"]');
+    });
+    // Filter: markdown/prose elements that are NOT inside a user prompt element
+    const assistantBubbles = allMarkdown.filter(el => {
+      return !userBubbles.some(ub => ub.contains(el));
+    });
+
+    if (userBubbles.length > 0 && assistantBubbles.length > 0) {
+      // Interleave by DOM order
+      const combined = [
+        ...userBubbles.map(el => ({ el, role: 'user' })),
+        ...assistantBubbles.map(el => ({ el, role: 'assistant' })),
+      ];
+      combined.sort((a, b) => {
+        const pos = a.el.compareDocumentPosition(b.el);
+        return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+      });
+
+      const msgs = combined
+        .map(({ el, role }) => ({ role, content: getInnerText(el) }))
+        .filter(m => m.content.length > 5);
+
+      if (hasBothRoles(msgs)) {
+        return {
+          success: true,
+          context: {
+            platform: 'chatgpt',
+            title: chatTitle(),
+            messages: deduplicate(msgs),
+            url: window.location.href,
+          }
+        };
+      }
     }
 
-    // ── Strategy 5: Alternating fallback ──
-    const fallback = universalFallback('main > div > div > div', 20);
+    // ══════════════════════════════════════════════════════════════════════
+    // Strategy 5: Absolute last resort — alternate blocks from main
+    // ══════════════════════════════════════════════════════════════════════
+    const fallback = [];
+    const blocks = document.querySelectorAll('main > div > div > div');
+    let lastRole = null;
+    blocks.forEach(el => {
+      if (!filterInputArea(el)) return;
+      const text = getInnerText(el);
+      if (text.length < 20) return;
+      const role = lastRole === 'user' ? 'assistant' : 'user';
+      lastRole = role;
+      fallback.push({ role, content: text });
+    });
+
     if (fallback.length === 0) {
       return { success: false, error: 'No conversation found. Make sure you have an active ChatGPT conversation open.' };
     }

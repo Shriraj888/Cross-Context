@@ -207,14 +207,25 @@ async function detectCurrentTab() {
 
     currentPlatformLabel.textContent = 'Open an AI chat to scrape context';
     platformDot.className = 'platform-dot';
-    platformDot.innerHTML = '';
-    platformDot.style.color = '';
+    platformDot.innerHTML = `
+      <svg class="radar-scan-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>
+    `;
+    platformDot.style.color = 'var(--text-muted)';
     consoleCard.className = 'console-card inactive';
     btnCapture.disabled = true;
     btnCaptureAi.disabled = true;
 
   } catch (err) {
     currentPlatformLabel.textContent = 'Could not detect page';
+    platformDot.className = 'platform-dot';
+    platformDot.innerHTML = `
+      <svg class="radar-scan-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>
+    `;
+    platformDot.style.color = 'var(--text-muted)';
     consoleCard.className = 'console-card inactive';
     btnCapture.disabled = true;
     btnCaptureAi.disabled = true;

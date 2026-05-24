@@ -272,16 +272,19 @@ body {
 }
 
 .console-card {
-  background: rgba(24, 24, 27, 0.5);
-  border: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(20, 20, 25, 0.65) 0%, rgba(10, 10, 15, 0.8) 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: var(--radius-lg);
-  padding: 10px 12px;
+  padding: 14px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(8px);
+  gap: 12px;
+  transition: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 
+    0 15px 35px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0px rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(20px) saturate(120%);
+  -webkit-backdrop-filter: blur(20px) saturate(120%);
   position: relative;
   overflow: hidden;
 }
@@ -289,81 +292,105 @@ body {
 .console-card::before {
   content: '';
   position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.01) 0%, transparent 60%),
-              radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.015) 0%, transparent 60%);
-  opacity: 0;
-  transition: opacity 0.5s ease;
+  inset: 0;
+  background: radial-gradient(circle at 10% 15%, rgba(255, 255, 255, 0.03) 0%, transparent 60%);
+  opacity: 1;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: none;
   z-index: 0;
-  animation: rotateMesh 20s linear infinite;
 }
 
-@keyframes rotateMesh {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+.console-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent, rgba(255, 255, 255, 0.03));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.8;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.console-card:not(.inactive)::before {
-  opacity: 1;
+.console-card.platform-claude {
+  border-color: rgba(217, 119, 82, 0.4) !important;
+  box-shadow: 
+    0 15px 35px rgba(217, 119, 82, 0.08),
+    inset 0 1px 0px rgba(255, 255, 255, 0.12) !important;
 }
-
 .console-card.platform-claude::before {
-  background: radial-gradient(circle at 30% 30%, rgba(217, 119, 82, 0.12) 0%, transparent 50%),
-              radial-gradient(circle at 70% 70%, rgba(251, 191, 36, 0.08) 0%, transparent 50%);
+  background: radial-gradient(circle at 10% 15%, rgba(217, 119, 82, 0.22) 0%, transparent 65%) !important;
+}
+.console-card.platform-claude::after {
+  background: linear-gradient(135deg, rgba(217, 119, 82, 0.3), transparent, rgba(217, 119, 82, 0.15)) !important;
+}
+
+.console-card.platform-chatgpt {
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  box-shadow: 
+    0 15px 35px rgba(16, 185, 129, 0.08),
+    inset 0 1px 0px rgba(255, 255, 255, 0.12) !important;
 }
 .console-card.platform-chatgpt::before {
-  background: radial-gradient(circle at 30% 30%, rgba(16, 185, 129, 0.12) 0%, transparent 50%),
-              radial-gradient(circle at 70% 70%, rgba(52, 211, 153, 0.08) 0%, transparent 50%);
+  background: radial-gradient(circle at 10% 15%, rgba(16, 185, 129, 0.22) 0%, transparent 65%) !important;
 }
-.console-card.platform-gemini::before {
-  background: radial-gradient(circle at 30% 30%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
-              radial-gradient(circle at 70% 70%, rgba(147, 197, 253, 0.08) 0%, transparent 50%);
-}
-.console-card.platform-grok::before {
-  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.05) 0%, transparent 50%),
-              radial-gradient(circle at 70% 70%, rgba(161, 161, 170, 0.03) 0%, transparent 50%);
-}
-.console-card.platform-perplexity::before {
-  background: radial-gradient(circle at 30% 30%, rgba(14, 165, 233, 0.15) 0%, transparent 50%),
-              radial-gradient(circle at 70% 70%, rgba(56, 189, 248, 0.08) 0%, transparent 50%);
+.console-card.platform-chatgpt::after {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.3), transparent, rgba(16, 185, 129, 0.15)) !important;
 }
 
-/* Dynamic glowing border matching the active platform */
-.console-card.platform-claude {
-  border-color: rgba(217, 119, 82, 0.3);
-  box-shadow: 0 0 15px rgba(217, 119, 82, 0.05);
-}
-.console-card.platform-chatgpt {
-  border-color: rgba(16, 185, 129, 0.3);
-  box-shadow: 0 0 15px rgba(16, 185, 129, 0.05);
-}
 .console-card.platform-gemini {
-  border-color: rgba(59, 130, 246, 0.3);
-  box-shadow: 0 0 15px rgba(59, 130, 246, 0.05);
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  box-shadow: 
+    0 15px 35px rgba(59, 130, 246, 0.08),
+    inset 0 1px 0px rgba(255, 255, 255, 0.12) !important;
 }
+.console-card.platform-gemini::before {
+  background: radial-gradient(circle at 10% 15%, rgba(59, 130, 246, 0.25) 0%, transparent 65%) !important;
+}
+.console-card.platform-gemini::after {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), transparent, rgba(59, 130, 246, 0.15)) !important;
+}
+
 .console-card.platform-grok {
-  border-color: rgba(244, 244, 245, 0.2);
-  box-shadow: 0 0 15px rgba(244, 244, 245, 0.02);
+  border-color: rgba(244, 244, 245, 0.25) !important;
+  box-shadow: 
+    0 15px 35px rgba(244, 244, 245, 0.04),
+    inset 0 1px 0px rgba(255, 255, 255, 0.1) !important;
 }
+.console-card.platform-grok::before {
+  background: radial-gradient(circle at 10% 15%, rgba(244, 244, 245, 0.15) 0%, transparent 65%) !important;
+}
+.console-card.platform-grok::after {
+  background: linear-gradient(135deg, rgba(244, 244, 245, 0.25), transparent, rgba(244, 244, 245, 0.1)) !important;
+}
+
 .console-card.platform-perplexity {
-  border-color: rgba(14, 165, 233, 0.3);
-  box-shadow: 0 0 15px rgba(14, 165, 233, 0.05);
+  border-color: rgba(14, 165, 233, 0.4) !important;
+  box-shadow: 
+    0 15px 35px rgba(14, 165, 233, 0.08),
+    inset 0 1px 0px rgba(255, 255, 255, 0.12) !important;
+}
+.console-card.platform-perplexity::before {
+  background: radial-gradient(circle at 10% 15%, rgba(14, 165, 233, 0.25) 0%, transparent 65%) !important;
+}
+.console-card.platform-perplexity::after {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.3), transparent, rgba(14, 165, 233, 0.15)) !important;
 }
 
 .console-card.inactive {
   opacity: 0.85;
-  border-color: var(--border);
-  background: rgba(12, 12, 13, 0.3);
-  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: linear-gradient(135deg, rgba(15, 15, 18, 0.6) 0%, rgba(8, 8, 12, 0.75) 100%) !important;
+  box-shadow: none !important;
 }
 
 .console-header, .capture-buttons-container {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .console-header {
@@ -375,11 +402,11 @@ body {
 .console-status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .console-platform-name {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: 0.1px;
@@ -391,46 +418,47 @@ body {
 
 /* Pulsing status indicator dot/ring */
 .platform-dot {
-  width: 8px;
-  height: 8px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: var(--text-muted);
+  background: transparent;
   position: relative;
-  transition: all 0.3s ease;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
-.platform-dot::after {
-  content: '';
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  right: -3px;
-  bottom: -3px;
-  border-radius: 50%;
-  border: 1px solid currentColor;
-  opacity: 0;
-  transform: scale(0.8);
-  transition: all 0.3s ease;
-}
-
-.platform-dot.active {
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-}
-
-.platform-dot.active::after {
-  display: none;
+.platform-dot svg {
+  display: block;
+  margin: 0 !important;
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .platform-dot.active svg {
-  display: block;
-  margin: 0 !important;
+  transform: scale(1.1);
+  animation: logoBounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes logoBounce {
+  0% { transform: scale(0.6); }
+  100% { transform: scale(1.1); }
+}
+
+.radar-scan-svg {
+  animation: radarScan 4s linear infinite, radarPulse 1.5s alternate infinite ease-in-out;
+  color: var(--text-muted);
+}
+
+@keyframes radarScan {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes radarPulse {
+  0% { opacity: 0.4; }
+  100% { opacity: 1; }
 }
 
 #current-platform-label {
@@ -1075,35 +1103,43 @@ body {
 
 .capture-buttons-container .btn-capture {
   flex: 1;
-  padding: 8px 6px;
+  height: 38px;
   justify-content: center;
   align-items: center;
-  font-size: 11.5px;
-  letter-spacing: 0.15px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
   border-radius: var(--radius-md);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
   display: inline-flex;
+  cursor: pointer;
+  box-sizing: border-box;
 }
 
 .btn-icon {
   flex-shrink: 0;
-  margin-right: 4px;
+  margin-right: 6px;
+  width: 14px;
+  height: 14px;
 }
 
+/* Secondary Button - Scrape Text (Redesigned for Premium Visibility) */
 .btn-capture.btn-secondary {
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(4px);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f4f4f5;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), inset 0 1px 0px rgba(255, 255, 255, 0.1);
 }
 
 .btn-capture.btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(14, 165, 233, 0.4);
-  color: var(--text-primary);
-  box-shadow: 0 0 10px rgba(14, 165, 233, 0.12);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  box-shadow: 0 6px 16px rgba(255, 255, 255, 0.08), inset 0 1px 0px rgba(255, 255, 255, 0.2);
   transform: translateY(-1px);
 }
 
@@ -1111,22 +1147,22 @@ body {
   transform: translateY(0);
 }
 
+/* Primary Button - AI Scrape (Redesigned for Ultimate Visibility and POP) */
 .btn-capture.btn-primary {
-  /* Premium modern generative purple-pink-blue gradient */
+  /* Dynamic gradient matching generative AI motif */
   background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%);
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
-  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .btn-capture.btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%);
+  background: linear-gradient(135deg, #5c53fc 0%, #8b4cfc 50%, #eb3b87 100%);
   color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.45), 0 0 8px rgba(219, 39, 119, 0.25);
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.55), 0 0 12px rgba(219, 39, 119, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.4);
   transform: translateY(-1px);
-  filter: brightness(1.05);
 }
 
 .btn-capture.btn-primary:active:not(:disabled) {
@@ -1141,7 +1177,7 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
   transform: translateX(-100%);
   transition: transform 0.6s ease;
 }
@@ -1152,6 +1188,16 @@ body {
 
 .sparkle-svg {
   margin-right: 4px;
+  transition: all 0.3s ease;
+}
+
+.btn-capture.btn-primary:hover:not(:disabled) .sparkle-svg {
+  animation: sparkleRotate 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes sparkleRotate {
+  0% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 2px #fff); }
+  100% { transform: scale(1.15) rotate(20deg); filter: drop-shadow(0 0 6px #fff); }
 }
 
 /* ── Settings Modal & Fields ──────────────── */

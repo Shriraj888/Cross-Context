@@ -324,15 +324,18 @@
       } else if (isUser && isAssistant) {
         role = 'assistant';
       } else {
-        // Fallback for elements without explicit indicators
-        const text = getInnerText(child);
-        if (text.length > 10) {
-          role = lastRole === 'user' ? 'assistant' : 'user';
+        // Try semantic role detection before alternating fallback
+        role = classifyRoleSemantically(child);
+        if (!role) {
+          const text = getInnerText(child);
+          if (text.length > 10) {
+            role = lastRole === 'user' ? 'assistant' : 'user';
+          }
         }
       }
 
       if (role) {
-        const text = getInnerText(child);
+        const text = extractContent(child, role);
         if (text.length > 0) {
           if (role === 'assistant' && text.length < 10) continue;
           messages.push({ role, content: text, element: child });
@@ -565,6 +568,314 @@
   }
 
 
+  // ════════════════════════════════════════════
+  // DOM SCRAPING RELIABILITY LAYER
+  // MutationObserver, fallback selectors, semantic roles,
+  // markdown reconstruction, virtualized list handling, shadow DOM
+  // ════════════════════════════════════════════
+
+  // ── Component 1: MutationObserver — DOM Readiness ──
+
+  /**
+   * Waits for DOM mutations to settle before scraping.
+   * Resolves when no new childList/subtree mutations fire for `quietMs`.
+   * Times out after `maxMs` to prevent hanging on infinite-streaming responses.
+   */
+  function waitForDomSettled(root = document.body, quietMs = 600, maxMs = 5000) {
+    return new Promise(resolve => {
+      let timer = null;
+      const deadline = setTimeout(() => { observer.disconnect(); resolve(); }, maxMs);
+      const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          observer.disconnect();
+          clearTimeout(deadline);
+          resolve();
+        }, quietMs);
+      });
+      observer.observe(root, { childList: true, subtree: true, characterData: true });
+      // Kickstart: if DOM is already stable, resolve after quietMs
+      timer = setTimeout(() => { observer.disconnect(); clearTimeout(deadline); resolve(); }, quietMs);
+    });
+  }
+
+  // ── Component 2: Fallback Selector Chains ──
+
+  /**
+   * Tries each selector group in priority order.
+   * Returns elements from the first group that produces results.
+   * Selectors are organized: [data-testid] > [data-*] > [class*=] > semantic > structural
+   */
+  function resilientQueryAll(selectorGroups, root = document, filterFn = filterInputArea) {
+    for (const group of selectorGroups) {
+      const selectors = Array.isArray(group) ? group.join(', ') : group;
+      try {
+        const els = [...root.querySelectorAll(selectors)].filter(filterFn);
+        if (els.length > 0) return els;
+      } catch (_) { /* invalid selector — skip */ }
+    }
+    return [];
+  }
+
+  // ── Component 3: Semantic Role Detection via ARIA ──
+
+  /**
+   * Infers message role from ARIA, structural, and heuristic signals.
+   * Returns 'user' | 'assistant' | null
+   */
+  function classifyRoleSemantically(el) {
+    if (!el || el.nodeType !== Node.ELEMENT_NODE) return null;
+
+    // 1. Explicit data attributes
+    const dataRole = el.getAttribute('data-message-author-role')
+                  || el.getAttribute('data-role')
+                  || el.getAttribute('data-message-role')
+                  || el.getAttribute('data-is-human');
+    if (dataRole === 'user' || dataRole === 'human' || dataRole === 'true') return 'user';
+    if (dataRole === 'assistant' || dataRole === 'bot' || dataRole === 'model' || dataRole === 'false') return 'assistant';
+
+    // 2. ARIA labels (platform-agnostic)
+    const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
+    if (/\b(user|human|you|your\s+message)\b/.test(ariaLabel)) return 'user';
+    if (/\b(assistant|ai|bot|model|response|answer|claude|chatgpt|gemini|grok)\b/.test(ariaLabel)) return 'assistant';
+
+    // 3. ARIA role — skip containers
+    const ariaRole = el.getAttribute('role');
+    if (ariaRole === 'log' || ariaRole === 'feed' || ariaRole === 'list') return null;
+
+    // 4. Structural: contains rich markdown rendering → likely assistant
+    if (el.querySelector('pre > code, table, .katex, [class*="math"], [class*="highlight"]')) return 'assistant';
+
+    // 5. Structural: short plaintext with no formatting → likely user
+    const text = (el.innerText || '').trim();
+    if (text.length > 0 && text.length < 500 && !el.querySelector('pre, code, table, ul, ol, h1, h2, h3, blockquote')) {
+      return 'user';
+    }
+
+    return null;
+  }
+
+  // ── Component 4: Markdown Reconstruction ──
+
+  /**
+   * Converts a DOM element to structured Markdown, preserving:
+   * - Code blocks (```lang ... ```)
+   * - Inline code (`...`)
+   * - Headers (# ## ###)
+   * - Lists (- / 1.)
+   * - Bold, italic, links
+   * - Tables (| col | col |)
+   * - Blockquotes (> ...)
+   */
+  function domToMarkdown(el) {
+    if (!el) return '';
+    const wasActive = isSessionActive;
+    if (!wasActive) startScrapingSession();
+
+    try {
+      return walkNode(el).replace(/\n{3,}/g, '\n\n').trim();
+    } finally {
+      if (!wasActive) endScrapingSession();
+    }
+  }
+
+  function walkNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent || '';
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+    // Skip hidden elements (but not body/html)
+    const tag = node.tagName;
+    if (tag !== 'BODY' && tag !== 'HTML') {
+      try {
+        const style = window.getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return '';
+      } catch (_) {}
+    }
+
+    // Skip scraping-noise elements
+    if (tag === 'BUTTON' || tag === 'SVG' || tag === 'NAV' || tag === 'FORM') return '';
+    if (node.getAttribute('role') === 'button') return '';
+
+    const children = () => Array.from(node.childNodes).map(walkNode).join('');
+
+    switch (tag) {
+      case 'PRE': {
+        const code = node.querySelector('code');
+        const lang = code?.className?.match(/language-(\w+)/)?.[1] || '';
+        const text = (code || node).textContent || '';
+        return `\n\`\`\`${lang}\n${text.trimEnd()}\n\`\`\`\n`;
+      }
+      case 'CODE':
+        if (node.parentElement?.tagName !== 'PRE') return `\`${node.textContent}\``;
+        return node.textContent || '';
+      case 'H1': return `\n# ${children().trim()}\n`;
+      case 'H2': return `\n## ${children().trim()}\n`;
+      case 'H3': return `\n### ${children().trim()}\n`;
+      case 'H4': return `\n#### ${children().trim()}\n`;
+      case 'H5': return `\n##### ${children().trim()}\n`;
+      case 'H6': return `\n###### ${children().trim()}\n`;
+      case 'STRONG': case 'B': return `**${children()}**`;
+      case 'EM': case 'I': return `*${children()}*`;
+      case 'DEL': case 'S': return `~~${children()}~~`;
+      case 'A': {
+        const href = node.getAttribute('href') || '';
+        const text = children().trim();
+        return href ? `[${text}](${href})` : text;
+      }
+      case 'UL': return '\n' + Array.from(node.children)
+        .filter(c => c.tagName === 'LI')
+        .map(li => `- ${walkNode(li).trim()}`).join('\n') + '\n';
+      case 'OL': return '\n' + Array.from(node.children)
+        .filter(c => c.tagName === 'LI')
+        .map((li, i) => `${i + 1}. ${walkNode(li).trim()}`).join('\n') + '\n';
+      case 'LI': return children();
+      case 'BLOCKQUOTE': {
+        const content = children().trim();
+        return '\n' + content.split('\n').map(l => `> ${l}`).join('\n') + '\n';
+      }
+      case 'TABLE': return convertTableToMarkdown(node);
+      case 'BR': return '\n';
+      case 'HR': return '\n---\n';
+      case 'P': return `\n${children()}\n`;
+      case 'DIV': return children() + '\n';
+      case 'IMG': {
+        const alt = node.getAttribute('alt') || 'image';
+        return `[${alt}]`;
+      }
+      case 'SUP': return ''; // strip citation superscripts
+      default: return children();
+    }
+  }
+
+  function convertTableToMarkdown(tableEl) {
+    const rows = [...tableEl.querySelectorAll('tr')];
+    if (rows.length === 0) return '';
+    const result = [];
+    rows.forEach((row, i) => {
+      const cells = [...row.querySelectorAll('th, td')].map(c => c.textContent.trim().replace(/\|/g, '\\|'));
+      result.push('| ' + cells.join(' | ') + ' |');
+      if (i === 0) result.push('| ' + cells.map(() => '---').join(' | ') + ' |');
+    });
+    return '\n' + result.join('\n') + '\n';
+  }
+
+  /**
+   * Extracts content from a message element.
+   * For assistant messages, reconstructs Markdown to preserve formatting.
+   * For user messages, uses plain text.
+   */
+  function extractContent(el, role) {
+    if (!el) return '';
+    // For assistant messages, reconstruct markdown to preserve code blocks, tables, etc.
+    if (role === 'assistant') {
+      const md = domToMarkdown(el);
+      if (md.length > 10) return md;
+    }
+    // For user messages or short assistant text, use plain text (faster, simpler)
+    return getInnerText(el);
+  }
+
+  // ── Component 5: Virtualized List Handling ──
+
+  /**
+   * Smoothly scrolls to the very top (start) of the scroll container to load all messages.
+   * This handles lazy-loading / virtualization, and visually demonstrates complete scraping to the user.
+   */
+  async function scrollToLoadAll(chatContainer, maxScrollTime = 8000) {
+    if (!chatContainer) return false;
+
+    // Find the scrollable ancestor
+    const scrollEl = findScrollableAncestor(chatContainer);
+    if (!scrollEl) return false;
+
+    const startTime = Date.now();
+    let lastScrollTop = scrollEl.scrollTop;
+    let lastScrollHeight = scrollEl.scrollHeight;
+    let staleCount = 0;
+
+    // Smoothly scroll UP in steps, pausing to load lazy-content at the top
+    while (Date.now() - startTime < maxScrollTime) {
+      if (scrollEl.scrollTop <= 5) {
+        // We are close to the top, let's wait to see if more content is prepended
+        await sleep(400);
+        await waitForDomSettled(scrollEl, 300, 1500);
+
+        // If scrollHeight changed or scrollTop is no longer near 0, keep scrolling up.
+        // Otherwise, we are truly at the start.
+        if (scrollEl.scrollTop <= 5 && scrollEl.scrollHeight === lastScrollHeight) {
+          break; // Truly at the top start of the conversation
+        }
+      }
+
+      // Perform a smooth scroll step upwards
+      const scrollStep = Math.round(scrollEl.clientHeight * 0.85);
+      scrollEl.scrollBy({ top: -scrollStep, behavior: 'smooth' });
+
+      // Wait for smooth scroll movement
+      await sleep(250);
+      await waitForDomSettled(scrollEl, 200, 1000);
+
+      // Check if we are stuck (i.e. cannot scroll up anymore and height hasn't changed)
+      if (scrollEl.scrollTop === lastScrollTop && scrollEl.scrollHeight === lastScrollHeight) {
+        staleCount++;
+        if (staleCount > 4) break;
+      } else {
+        staleCount = 0;
+      }
+
+      lastScrollTop = scrollEl.scrollTop;
+      lastScrollHeight = scrollEl.scrollHeight;
+    }
+
+    // A final smooth scroll to absolute 0 to ensure we are perfectly at the start
+    scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
+    await sleep(500);
+
+    return true;
+  }
+
+  /**
+   * Finds the nearest scrollable ancestor of an element.
+   */
+  function findScrollableAncestor(el) {
+    let curr = el;
+    while (curr && curr !== document.body && curr !== document.documentElement) {
+      const style = window.getComputedStyle(curr);
+      const overflowY = style.overflowY;
+      if ((overflowY === 'auto' || overflowY === 'scroll') && curr.scrollHeight > curr.clientHeight) {
+        return curr;
+      }
+      curr = curr.parentElement;
+    }
+    // Fallback to the element itself if it has scroll
+    if (el.scrollHeight > el.clientHeight) return el;
+    return null;
+  }
+
+  // ── Component 6: Shadow DOM Traversal ──
+
+  /**
+   * querySelectorAll that also pierces open shadow roots.
+   * Recursively searches through shadow DOM boundaries.
+   */
+  function querySelectorDeep(selector, root = document) {
+    const results = [...root.querySelectorAll(selector)];
+
+    // Traverse into open shadow roots
+    const walk = (node) => {
+      if (node.shadowRoot) {
+        results.push(...node.shadowRoot.querySelectorAll(selector));
+        node.shadowRoot.querySelectorAll('*').forEach(walk);
+      }
+    };
+
+    root.querySelectorAll('*').forEach(walk);
+    return results;
+  }
+
+
   const SCRAPERS = {
 
     claude() {
@@ -690,77 +1001,286 @@
       const chatTitle = () =>
         document.title.replace(/[-–|]?\s*ChatGPT.*$/i, '').trim() || 'ChatGPT Conversation';
 
-      // ── Strategy 1: Direct data-message-author-role attribute (most reliable) ──
-      // ChatGPT tags every message container with data-message-author-role="user"|"assistant".
-      // This is the MOST accurate approach — read the role straight from the attribute.
-      const roleEls = [...document.querySelectorAll('[data-message-author-role]')].filter(filterInputArea);
-      if (roleEls.length > 0) {
-        const msgs = roleEls.map(el => {
-          const role = el.getAttribute('data-message-author-role');
-          // Only accept 'user' or 'assistant' roles — skip system/tool messages
-          if (role !== 'user' && role !== 'assistant') return null;
-          // Prefer the inner prose/markdown div for cleaner text; fall back to the whole element
-          const inner = el.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || el;
-          return { role, content: getInnerText(inner), element: el };
-        }).filter(m => m && m.content.length > 3);
-        if (hasBothRoles(msgs)) {
-          return { messages: deduplicate(msgs), title: chatTitle() };
-        }
-      }
-
-      // ── Strategy 2: article elements with embedded role attribute ──
-      // Each ChatGPT message turn is wrapped in an <article>. Find the role indicator inside.
-      const articles = [...document.querySelectorAll('article[data-testid*="conversation-turn"]')].filter(filterInputArea);
-      if (articles.length > 0) {
-        const msgs = articles.flatMap(art => {
-          const roleEl = art.querySelector('[data-message-author-role]');
-          if (!roleEl) return [];
-          const role = roleEl.getAttribute('data-message-author-role');
-          if (role !== 'user' && role !== 'assistant') return [];
-          // For user messages, read the text from the role element itself
-          // For assistant messages, prefer the markdown container for cleaner output
-          let textEl = roleEl;
-          if (role === 'assistant') {
-            textEl = art.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || roleEl;
-          }
-          const content = getInnerText(textEl);
-          return content.length > 3 ? [{ role, content, element: art }] : [];
-        });
-        if (hasBothRoles(msgs)) {
-          return { messages: deduplicate(msgs), title: chatTitle() };
-        }
-      }
-
-      // ── Strategy 3: Broader article fallback (no data-testid filter) ──
-      const allArticles = [...document.querySelectorAll('article')].filter(filterInputArea);
-      if (allArticles.length > 0) {
-        const msgs = allArticles.flatMap(art => {
-          const roleEl = art.querySelector('[data-message-author-role]');
-          if (!roleEl) return [];
-          const role = roleEl.getAttribute('data-message-author-role');
-          if (role !== 'user' && role !== 'assistant') return [];
-          const inner = (role === 'assistant')
-            ? (art.querySelector('.markdown, .whitespace-pre-wrap, [class*="prose"]') || art)
-            : art;
-          const content = getInnerText(inner);
-          return content.length > 5 ? [{ role, content, element: art }] : [];
-        });
-        if (hasBothRoles(msgs)) {
-          return { messages: deduplicate(msgs), title: chatTitle() };
-        }
-      }
-
-      // ── Strategy 4: LCA-based turn extractor (fallback for changed DOM) ──
-      const lcaMsgs = extractConversationViaLCA(
+      const userSelectors = [
         '[data-message-author-role="user"]',
+        '[data-testid*="user-message"]',
+        '[class*="user-message"]',
+        '[class*="user_message"]',
+        '[class*="justify-end"] .whitespace-pre-wrap',
+        '[class*="justify-end"] [class*="whitespace-pre-wrap"]',
+        '.whitespace-pre-wrap:not(.markdown *):not([class*="prose"] *):not([class*="markdown"] *)'
+      ].join(', ');
+
+      const assistantSelectors = [
         '[data-message-author-role="assistant"]',
-        'button[aria-label*="Copy" i], button[data-testid*="copy" i]'
-      );
-      if (lcaMsgs && hasBothRoles(lcaMsgs)) {
-        return { messages: deduplicate(lcaMsgs), title: chatTitle() };
+        '[data-testid*="assistant-message"]',
+        '[class*="assistant-message"]',
+        '[class*="assistant_message"]',
+        '[class*="agent-"]',
+        '[class*="agent_"]',
+        '.markdown',
+        '[class*="markdown"]',
+        '[class*="prose"]'
+      ].join(', ');
+
+      const copyButtonSelectors = [
+        'button[aria-label*="Copy" i]',
+        'button[data-testid*="copy" i]',
+        '[class*="copy-button"]',
+        'button[class*="copy"]'
+      ].join(', ');
+
+      // Helper: determine if an element is an assistant response (markdown-rendered or has assistant indicators)
+      function isAssistantBlock(el) {
+        if (!el) return false;
+        if (el.matches(assistantSelectors)) return true;
+        if (el.querySelector(assistantSelectors)) return true;
+        if (el.querySelector(copyButtonSelectors)) return true;
+        if (el.querySelector('button[aria-label*="Good" i], button[aria-label*="Bad" i], button[aria-label*="feedback" i], [class*="thumbs"] button')) {
+          return true;
+        }
+        if (el.querySelector('pre, code, table, ol, ul > li > p')) {
+          return true;
+        }
+        return false;
       }
 
-      // ── Strategy 5: Alternating fallback ──
+      // Helper: determine if an element is a user message bubble (plain text prompt)
+      function isUserBubble(el) {
+        if (!el) return false;
+        if (isAssistantBlock(el)) return false;
+        if (el.matches(userSelectors)) return true;
+        if (el.querySelector(userSelectors)) return true;
+        return false;
+      }
+
+      // Helper: extract clean text from a turn container
+      function extractTurnText(el, role) {
+        if (role === 'assistant') {
+          const md = el.querySelector('.markdown, [class*="prose"], [class*="markdown"]');
+          if (md) return getInnerText(md);
+        }
+        if (role === 'user') {
+          const wp = el.querySelector('.whitespace-pre-wrap, [class*="whitespace-pre-wrap"]');
+          if (wp) return getInnerText(wp);
+        }
+        return getInnerText(el);
+      }
+
+      // Helper: determine article role by multi-layered checks (including visual alignment)
+      const mainEl = document.querySelector('main') || document.querySelector('[role="main"]');
+      function determineArticleRole(art) {
+        // 1. Check direct role attribute
+        const roleEl = art.querySelector('[data-message-author-role]') ||
+                       (art.hasAttribute('data-message-author-role') ? art : null);
+        if (roleEl) {
+          const role = roleEl.getAttribute('data-message-author-role');
+          if (role === 'user' || role === 'assistant') return role;
+        }
+
+        // 2. Check layout classes
+        const hasUserClass = art.querySelector('[class*="justify-end"], [class*="items-end"]') || 
+                             art.classList.contains('justify-end') || 
+                             art.classList.contains('items-end');
+        if (hasUserClass) return 'user';
+
+        const hasAssistantClass = art.querySelector('[class*="justify-start"], [class*="agent-"], [class*="assistant-"]') || 
+                                  art.classList.contains('justify-start') ||
+                                  art.classList.contains('agent-') ||
+                                  art.classList.contains('assistant-');
+        if (hasAssistantClass) return 'assistant';
+
+        // 2.5. Semantic role detection (ARIA, structural heuristics)
+        const semanticRole = classifyRoleSemantically(art);
+        if (semanticRole) return semanticRole;
+
+        // 3. Fallback to visual alignment
+        if (mainEl) {
+          const rect = art.getBoundingClientRect();
+          const chatRect = mainEl.getBoundingClientRect();
+          if (chatRect.width > 0) {
+            const textEl = art.querySelector('.whitespace-pre-wrap, .markdown, [class*="prose"], [class*="message-content"]') || art;
+            const tRect = textEl.getBoundingClientRect();
+            const leftMargin = tRect.left - chatRect.left;
+            const rightMargin = chatRect.right - tRect.right;
+            if (leftMargin > rightMargin && leftMargin > chatRect.width * 0.15) {
+              return 'user';
+            } else {
+              return 'assistant';
+            }
+          }
+        }
+
+        // 4. Default fallback: check for assistant-specific elements
+        if (isAssistantBlock(art)) return 'assistant';
+        if (isUserBubble(art)) return 'user';
+
+        return 'user';
+      }
+
+      // ── Strategy 1: Interleaved direct selection (most robust for ChatGPT's unified article turns) ──
+      const humanEls = [...document.querySelectorAll(userSelectors)].filter(filterInputArea);
+      let assistantEls = [...document.querySelectorAll(assistantSelectors)].filter(filterInputArea);
+      
+      // Exclude assistant elements that are actually inside user elements
+      assistantEls = assistantEls.filter(el => !humanEls.some(userEl => userEl.contains(el)));
+      
+      // Exclude user elements that are inside assistant elements (e.g. whitespace-pre-wrap in code blocks)
+      const cleanUserEls = humanEls.filter(el => !assistantEls.some(assistantEl => assistantEl.contains(el)));
+
+      if (cleanUserEls.length > 0 && assistantEls.length > 0) {
+        const combined = [
+          ...cleanUserEls.map(el => ({ el, role: 'user' })),
+          ...assistantEls.map(el => ({ el, role: 'assistant' }))
+        ];
+        combined.sort((a, b) => a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+
+        const msgs = combined.map(({ el, role }) => {
+          const content = extractTurnText(el, role);
+          return { role, content, element: el };
+        }).filter(m => m.content.length > 2);
+
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: chatTitle() };
+        }
+      }
+
+      // ── Strategy 2: Article-based inner turns extraction ──
+      const articles = [...document.querySelectorAll('article')].filter(filterInputArea);
+      if (articles.length > 0) {
+        const msgs = [];
+        for (const art of articles) {
+          const artUserEls = [...art.querySelectorAll(userSelectors)].filter(filterInputArea);
+          let artAssistantEls = [...art.querySelectorAll(assistantSelectors)].filter(filterInputArea);
+          
+          artAssistantEls = artAssistantEls.filter(el => !artUserEls.some(userEl => userEl.contains(el)));
+          const cleanArtUserEls = artUserEls.filter(el => !artAssistantEls.some(assistantEl => assistantEl.contains(el)));
+
+          const combined = [
+            ...cleanArtUserEls.map(el => ({ el, role: 'user' })),
+            ...artAssistantEls.map(el => ({ el, role: 'assistant' }))
+          ];
+          combined.sort((a, b) => a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+
+          combined.forEach(({ el, role }) => {
+            const content = extractTurnText(el, role);
+            if (content.length > 2) {
+              msgs.push({ role, content, element: el });
+            }
+          });
+        }
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: chatTitle() };
+        }
+      }
+
+      // ── Strategy 3: Next-sibling anchor approach ──
+      if (cleanUserEls.length > 0) {
+        const msgs = [];
+        cleanUserEls.forEach(humanEl => {
+          const userText = getInnerText(humanEl);
+          if (userText.length > 0) msgs.push({ role: 'user', content: userText, element: humanEl });
+
+          let cursor = humanEl;
+          let assistantText = '';
+
+          for (let depth = 0; depth < 8 && !assistantText; depth++) {
+            let sibling = cursor.nextElementSibling;
+            while (sibling && !assistantText) {
+              const containsHumanTurn =
+                sibling.getAttribute('data-testid') === 'user-message' ||
+                sibling.querySelector('[data-testid*="user-message"]') !== null ||
+                sibling.matches(userSelectors) ||
+                sibling.querySelector(userSelectors) !== null;
+              
+              if (containsHumanTurn) break;
+
+              const innerContent = sibling.querySelector(
+                '.markdown, [class*="prose"], [class*="markdown"], ' +
+                '[class*="message-content"], [class*="response-content"], ' +
+                '[class*="agent-"], [class*="assistant"]'
+              );
+              const text = getInnerText(innerContent || sibling);
+
+              if (text.length > 20) {
+                assistantText = text;
+              } else {
+                sibling = sibling.nextElementSibling;
+              }
+            }
+
+            cursor = cursor.parentElement;
+            if (!cursor || cursor === document.body) break;
+          }
+
+          if (assistantText.length > 0) {
+            msgs.push({ role: 'assistant', content: assistantText, element: humanEl });
+          }
+        });
+
+        if (msgs.length > 0 && hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: chatTitle() };
+        }
+      }
+
+      // ── Strategy 4: LCA-based turn extractor ──
+      try {
+        const lcaMsgs = extractConversationViaLCA(userSelectors, assistantSelectors, copyButtonSelectors);
+        if (lcaMsgs && hasBothRoles(lcaMsgs)) {
+          return { messages: deduplicate(lcaMsgs), title: chatTitle() };
+        }
+      } catch (e) {
+        // Continue
+      }
+
+      // ── Strategy 5: Walk all direct children of the deepest multi-child container ──
+      if (mainEl) {
+        let container = mainEl;
+        let found = false;
+        const maxDepth = 15;
+        for (let d = 0; d < maxDepth && !found; d++) {
+          for (const child of container.children) {
+            if (child.children.length >= 2) {
+              let textChildCount = 0;
+              let hasUserLike = false;
+              let hasAssistantLike = false;
+              for (const grandchild of child.children) {
+                const text = (grandchild.innerText || '').trim();
+                if (text.length > 10) textChildCount++;
+                if (isAssistantBlock(grandchild)) hasAssistantLike = true;
+                if (isUserBubble(grandchild)) hasUserLike = true;
+              }
+              if (textChildCount >= 2 && hasUserLike && hasAssistantLike) {
+                container = child;
+                found = true;
+                break;
+              }
+            }
+          }
+          if (!found && container.children.length === 1) {
+            container = container.children[0];
+          } else if (!found) {
+            break;
+          }
+        }
+
+        if (found) {
+          const msgs = [];
+          for (const child of container.children) {
+            if (!filterInputArea(child)) continue;
+            const role = determineArticleRole(child);
+            const content = extractTurnText(child, role);
+            if (content.length > 3) {
+              msgs.push({ role, content, element: child });
+            }
+          }
+          if (hasBothRoles(msgs)) {
+            return { messages: deduplicate(msgs), title: chatTitle() };
+          }
+        }
+      }
+
+      // ── Strategy 6: Alternating fallback ──
       return { messages: deduplicate(universalFallback('main > div > div > div', 20)), title: chatTitle() };
     },
 
@@ -778,9 +1298,9 @@
         return { messages: deduplicate(lcaMsgs), title: gemTitle() };
       }
 
-      // ── Strategy 2: custom element tags <user-query> / <model-response> ──
-      const userEls  = [...document.querySelectorAll('user-query')].filter(filterInputArea);
-      const modelEls = [...document.querySelectorAll('model-response')].filter(filterInputArea);
+      // ── Strategy 2: custom element tags <user-query> / <model-response> (with shadow DOM piercing) ──
+      const userEls  = querySelectorDeep('user-query').filter(filterInputArea);
+      const modelEls = querySelectorDeep('model-response').filter(filterInputArea);
       if (userEls.length > 0 && modelEls.length > 0) {
         const msgs = interleaveByDomOrder(userEls, modelEls, getInnerText);
         if (hasBothRoles(msgs)) {
@@ -1075,18 +1595,9 @@
     
     const shadow = host.attachShadow({ mode: 'open' });
     
-    // Resolve platform colors dynamically
-    const colors = PLATFORM_COLORS[platform] || { primary: '#3b82f6', glow: 'rgba(59, 130, 246, 0.25)', bg: 'rgba(59, 130, 246, 0.05)' };
-
     const style = document.createElement('style');
     style.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
-
-      :host {
-        --primary: ${colors.primary};
-        --primary-glow: ${colors.glow};
-        --primary-bg: ${colors.bg};
-      }
+      @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
       .halo-container {
         all: initial !important;
@@ -1098,12 +1609,12 @@
         pointer-events: auto !important;
         box-sizing: border-box !important;
         opacity: 0 !important;
-        background-color: rgba(6, 8, 12, 0.4) !important;
+        background-color: rgba(4, 5, 10, 0.4) !important;
         backdrop-filter: blur(0px) !important;
         -webkit-backdrop-filter: blur(0px) !important;
-        transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
-                    backdrop-filter 0.4s cubic-bezier(0.16, 1, 0.3, 1),
-                    -webkit-backdrop-filter 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+                    backdrop-filter 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+                    -webkit-backdrop-filter 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
         will-change: opacity, backdrop-filter !important;
         display: flex !important;
         align-items: center !important;
@@ -1112,8 +1623,8 @@
       
       .halo-container.agent-active {
         opacity: 1 !important;
-        backdrop-filter: blur(8px) !important;
-        -webkit-backdrop-filter: blur(8px) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
       }
 
       .halo-container::before {
@@ -1123,281 +1634,183 @@
         box-sizing: border-box !important;
         pointer-events: none !important;
         box-shadow: 
-          inset 0 0 40px rgba(0, 0, 0, 0.6),
-          inset 0 0 100px var(--primary-glow) !important;
+          inset 0 0 100px rgba(0, 0, 0, 0.8),
+          inset 0 0 200px rgba(var(--active-rgb), 0.15) !important;
         opacity: 0 !important;
-        transition: opacity 0.6s ease !important;
+        transition: opacity 0.8s ease !important;
         will-change: opacity !important;
       }
 
       .halo-container.agent-active::before {
-        opacity: 0.6 !important;
+        opacity: 1 !important;
         animation: cc-glow-pulse 4s infinite cubic-bezier(0.4, 0, 0.2, 1) !important;
       }
 
       .console-card {
-        background: linear-gradient(135deg, rgba(13, 16, 26, 0.78) 0%, rgba(8, 10, 16, 0.88) 100%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-radius: 20px !important;
-        padding: 24px !important;
-        width: 380px !important;
+        background: linear-gradient(135deg, rgba(22, 26, 33, 0.9) 0%, rgba(13, 16, 21, 0.95) 100%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        border-radius: 18px !important;
+        padding: 20px 24px !important;
+        width: 440px !important;
+        position: relative !important;
         box-shadow: 
-          0 25px 60px rgba(0, 0, 0, 0.65),
-          0 0 40px rgba(0, 0, 0, 0.3),
-          inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-        color: #f1f5f9 !important;
+          0 20px 50px rgba(0, 0, 0, 0.6),
+          0 0 0 1px rgba(255, 255, 255, 0.03),
+          inset 0 1px 0px rgba(255, 255, 255, 0.08) !important;
+        font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif !important;
+        color: #ffffff !important;
         display: flex !important;
-        flex-direction: column !important;
+        flex-direction: row !important;
+        align-items: center !important;
         gap: 20px !important;
-        backdrop-filter: blur(16px) !important;
-        -webkit-backdrop-filter: blur(16px) !important;
-        transform: scale(0.95) translateY(10px) !important;
+        backdrop-filter: blur(24px) saturate(120%) !important;
+        -webkit-backdrop-filter: blur(24px) saturate(120%) !important;
+        transform: scale(0.94) translateY(15px) !important;
         opacity: 0 !important;
-        transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
-                    opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        transition: transform 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.175),
+                    opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                    border-color 0.4s ease,
+                    box-shadow 0.4s ease !important;
         box-sizing: border-box !important;
+        overflow: hidden !important;
+      }
+
+      /* State-specific background ambient glows */
+      .console-card::before {
+        content: '' !important;
+        position: absolute !important;
+        inset: 0 !important;
+        border-radius: 18px !important;
+        background: radial-gradient(circle at 45px 50%, rgba(var(--active-rgb), 0.22) 0%, transparent 60%) !important;
+        transition: background 0.4s ease !important;
+        pointer-events: none !important;
+        z-index: 0 !important;
       }
 
       .halo-container.agent-active .console-card {
         transform: scale(1) translateY(0) !important;
         opacity: 1 !important;
+        box-shadow: 
+          0 25px 60px rgba(0, 0, 0, 0.65),
+          0 0 40px rgba(var(--active-rgb), 0.14),
+          inset 0 1px 0px rgba(255, 255, 255, 0.08) !important;
+        border-color: rgba(var(--active-rgb), 0.25) !important;
       }
 
-      .console-header {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
-        padding-bottom: 16px !important;
-        box-sizing: border-box !important;
-      }
-
-      .brand-wrapper {
-        display: flex !important;
-        align-items: center !important;
-        gap: 12px !important;
-      }
-
-      .brand-icon-container {
-        width: 32px !important;
-        height: 32px !important;
-        border-radius: 8px !important;
-        background: rgba(255, 255, 255, 0.03) !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      /* Concentric Icon Wrapper System */
+      .console-icon-wrapper {
+        width: 44px !important;
+        height: 44px !important;
+        border-radius: 50% !important;
+        background: rgba(var(--active-rgb), 0.14) !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        color: var(--primary) !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+        flex-shrink: 0 !important;
+        transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        z-index: 2 !important;
+        box-shadow: 0 0 0 1px rgba(var(--active-rgb), 0.15) !important;
+      }
+
+      .console-icon-inner {
+        width: 28px !important;
+        height: 28px !important;
+        border-radius: 50% !important;
+        background: rgb(var(--active-rgb)) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        color: #ffffff !important;
+        transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        box-shadow: 0 2px 6px rgba(var(--active-rgb), 0.3) !important;
         flex-shrink: 0 !important;
       }
 
-      .brand-icon-container svg {
-        width: 18px !important;
-        height: 18px !important;
-      }
-
-      .title-stack {
-        display: flex !important;
-        flex-direction: column !important;
-      }
-
-      .console-title {
-        font-size: 13.5px !important;
-        font-weight: 700 !important;
-        color: #f8fafc !important;
-        letter-spacing: 0.5px !important;
-        text-transform: uppercase !important;
-        line-height: 1.2 !important;
-      }
-
-      .console-subtitle {
-        font-size: 8.5px !important;
-        font-weight: 600 !important;
-        color: #64748b !important;
-        letter-spacing: 1px !important;
-        text-transform: uppercase !important;
-        font-family: 'JetBrains Mono', monospace !important;
-        margin-top: 3px !important;
-      }
-
-      .status-badge {
-        display: flex !important;
-        align-items: center !important;
-        gap: 6px !important;
-        background: var(--primary-bg) !important;
-        border: 1px solid rgba(255, 255, 255, 0.06) !important;
-        padding: 4px 10px !important;
-        border-radius: 20px !important;
-        color: var(--primary) !important;
-        font-size: 9px !important;
-        font-weight: 700 !important;
-        letter-spacing: 0.5px !important;
-        text-transform: uppercase !important;
-        box-sizing: border-box !important;
-        transition: all 0.3s ease !important;
-      }
-
-      .status-badge.completed {
-        background: rgba(52, 211, 153, 0.08) !important;
-        color: #34d399 !important;
-        border-color: rgba(52, 211, 153, 0.2) !important;
-      }
-
-      .status-badge.failed {
-        background: rgba(239, 68, 68, 0.08) !important;
-        color: #f87171 !important;
-        border-color: rgba(239, 68, 68, 0.2) !important;
-      }
-
-      .badge-dot {
-        width: 6px !important;
-        height: 6px !important;
-        background-color: currentColor !important;
-        border-radius: 50% !important;
-        box-shadow: 0 0 8px currentColor !important;
-        transition: all 0.3s ease !important;
-      }
-      
-      .status-badge:not(.completed):not(.failed) .badge-dot {
-        animation: cc-dot-pulse 1.2s infinite alternate ease-in-out !important;
-      }
-
-      .console-body {
+      /* Right Text System */
+      .console-text-container {
         display: flex !important;
         flex-direction: column !important;
         gap: 4px !important;
-        box-sizing: border-box !important;
-        position: relative !important;
-      }
-
-      /* Vertical Timeline Line */
-      .steps-container {
-        position: relative !important;
-        display: flex !important;
-        flex-direction: column !important;
-        gap: 12px !important;
-        box-sizing: border-box !important;
-      }
-
-      .steps-container::before {
-        content: '' !important;
-        position: absolute !important;
-        left: 9px !important;
-        top: 14px !important;
-        bottom: 14px !important;
-        width: 1.5px !important;
-        background: linear-gradient(to bottom, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05)) !important;
-        z-index: 1 !important;
-      }
-
-      .step-item {
-        display: flex !important;
-        align-items: center !important;
-        gap: 14px !important;
-        font-size: 13px !important;
-        font-weight: 500 !important;
-        opacity: 0.35 !important;
-        color: #94a3b8 !important;
-        transition: opacity 0.3s ease, color 0.3s ease !important;
-        box-sizing: border-box !important;
-        position: relative !important;
+        flex: 1 !important;
         z-index: 2 !important;
-        padding: 4px 0 !important;
       }
 
-      .step-item.active {
-        opacity: 1 !important;
-        color: #e2e8f0 !important;
-      }
-
-      .step-item.completed {
-        opacity: 0.8 !important;
-        color: #94a3b8 !important;
-      }
-
-      .step-icon {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        width: 20px !important;
-        height: 20px !important;
-        flex-shrink: 0 !important;
-        position: relative !important;
-      }
-
-      .step-text {
-        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
-        font-weight: 500 !important;
-      }
-
-      /* Step Icon Shapes */
-      .dot {
-        width: 6px !important;
-        height: 6px !important;
-        background-color: rgba(255, 255, 255, 0.2) !important;
-        border-radius: 50% !important;
+      .console-title {
+        font-size: 15px !important;
+        font-weight: 600 !important;
+        color: #ffffff !important;
+        line-height: 1.25 !important;
+        letter-spacing: -0.1px !important;
         transition: all 0.3s ease !important;
       }
 
-      .spinner {
-        width: 12px !important;
-        height: 12px !important;
-        border: 2px solid rgba(255, 255, 255, 0.05) !important;
-        border-top: 2px solid var(--primary) !important;
-        border-radius: 50% !important;
-        animation: cc-spin 0.6s linear infinite !important;
+      .console-subtitle {
+        font-size: 12.5px !important;
+        font-weight: 400 !important;
+        color: rgba(255, 255, 255, 0.6) !important;
+        line-height: 1.4 !important;
+        transition: all 0.3s ease !important;
       }
 
-      .check-circle {
-        width: 20px !important;
-        height: 20px !important;
-        border-radius: 50% !important;
-        background: rgba(52, 211, 153, 0.1) !important;
-        border: 1px solid rgba(52, 211, 153, 0.2) !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        animation: cc-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards !important;
+      /* Animations */
+      .cc-spin-icon {
+        animation: cc-spin 1.2s linear infinite !important;
       }
 
-      .cross-circle {
-        width: 20px !important;
-        height: 20px !important;
-        border-radius: 50% !important;
-        background: rgba(239, 68, 68, 0.1) !important;
-        border: 1px solid rgba(239, 68, 68, 0.2) !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        animation: cc-shake 0.4s ease-in-out forwards !important;
+      .cc-pulse-icon {
+        animation: cc-pulse-scale 1.4s infinite ease-in-out !important;
       }
 
-      @keyframes cc-pop {
+      .cc-bounce-up-icon {
+        animation: cc-bounce-up 1s infinite ease-in-out !important;
+      }
+
+      .cc-sparkle-icon {
+        animation: cc-sparkle 1.4s infinite ease-in-out !important;
+      }
+
+      .cc-bounce-icon {
+        animation: cc-pop-check 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
+      }
+
+      .cc-shake-icon {
+        animation: cc-shake 0.45s ease-in-out forwards !important;
+      }
+
+      @keyframes cc-spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      @keyframes cc-pulse-scale {
+        0%, 100% { transform: scale(0.92); opacity: 0.85; }
+        50% { transform: scale(1.08); opacity: 1; }
+      }
+
+      @keyframes cc-bounce-up {
+        0%, 100% { transform: translateY(1.5px); }
+        50% { transform: translateY(-2.5px); }
+      }
+
+      @keyframes cc-sparkle {
+        0%, 100% { transform: scale(0.9); filter: drop-shadow(0 0 1px rgba(var(--active-rgb), 0.3)); }
+        50% { transform: scale(1.15); filter: drop-shadow(0 0 5px rgba(var(--active-rgb), 0.7)); }
+      }
+
+      @keyframes cc-pop-check {
         0% { transform: scale(0.6); opacity: 0; }
         100% { transform: scale(1); opacity: 1; }
       }
 
       @keyframes cc-shake {
         0%, 100% { transform: translateX(0); }
-        20%, 60% { transform: translateX(-2px); }
-        40%, 80% { transform: translateX(2px); }
+        20%, 60% { transform: translateX(-3px); }
+        40%, 80% { transform: translateX(3px); }
       }
 
       @keyframes cc-glow-pulse {
-        0%, 100% { opacity: 0.3 !important; }
-        50% { opacity: 0.6 !important; }
-      }
-
-      @keyframes cc-dot-pulse {
-        from { opacity: 0.4 !important; transform: scale(0.85) !important; }
-        to { opacity: 1 !important; transform: scale(1.15) !important; }
-      }
-
-      @keyframes cc-spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+        0%, 100% { opacity: 0.35 !important; }
+        50% { opacity: 0.65 !important; }
       }
     `;
     shadow.appendChild(style);
@@ -1407,145 +1820,116 @@
     
     const consoleCard = document.createElement('div');
     consoleCard.className = 'console-card';
+    consoleCard.style.setProperty('--active-rgb', '59, 130, 246');
     
-    const header = document.createElement('div');
-    header.className = 'console-header';
+    const iconWrapper = document.createElement('div');
+    iconWrapper.className = 'console-icon-wrapper';
     
-    const brandWrapper = document.createElement('div');
-    brandWrapper.className = 'brand-wrapper';
+    const iconInner = document.createElement('div');
+    iconInner.className = 'console-icon-inner';
+    iconWrapper.appendChild(iconInner);
     
-    const brandIconContainer = document.createElement('div');
-    brandIconContainer.className = 'brand-icon-container';
-    brandIconContainer.innerHTML = getDropOverlayIcon(platform);
-    
-    const titleStack = document.createElement('div');
-    titleStack.className = 'title-stack';
+    const textContainer = document.createElement('div');
+    textContainer.className = 'console-text-container';
     
     const titleDiv = document.createElement('div');
     titleDiv.className = 'console-title';
-    titleDiv.textContent = 'CROSS CONTEXT';
     
     const subtitleDiv = document.createElement('div');
     subtitleDiv.className = 'console-subtitle';
-    subtitleDiv.textContent = 'Extraction Pipeline';
     
-    titleStack.appendChild(titleDiv);
-    titleStack.appendChild(subtitleDiv);
+    textContainer.appendChild(titleDiv);
+    textContainer.appendChild(subtitleDiv);
     
-    brandWrapper.appendChild(brandIconContainer);
-    brandWrapper.appendChild(titleStack);
-    
-    const badge = document.createElement('div');
-    badge.className = 'status-badge';
-    
-    const dot = document.createElement('div');
-    dot.className = 'badge-dot';
-    
-    const label = document.createElement('span');
-    label.textContent = 'ACTIVE';
-    
-    badge.appendChild(dot);
-    badge.appendChild(label);
-    
-    header.appendChild(brandWrapper);
-    header.appendChild(badge);
-    
-    const body = document.createElement('div');
-    body.className = 'console-body';
-    
-    const stepsContainer = document.createElement('div');
-    stepsContainer.className = 'steps-container';
-    
-    const steps = [
-      'Detecting active platform...',
-      'Locating message containers...',
-      'Scraping conversation turns...',
-      'Formatting context payload...',
-      'Context scraped successfully!'
-    ];
-    
-    steps.forEach((stepText, idx) => {
-      const stepDiv = document.createElement('div');
-      stepDiv.className = 'step-item';
-      stepDiv.id = `cc-step-${idx}`;
-      
-      const iconDiv = document.createElement('div');
-      iconDiv.className = 'step-icon';
-      
-      const textSpan = document.createElement('span');
-      textSpan.className = 'step-text';
-      textSpan.textContent = stepText;
-      
-      stepDiv.appendChild(iconDiv);
-      stepDiv.appendChild(textSpan);
-      stepsContainer.appendChild(stepDiv);
-    });
-    
-    body.appendChild(stepsContainer);
-    consoleCard.appendChild(header);
-    consoleCard.appendChild(body);
+    consoleCard.appendChild(iconWrapper);
+    consoleCard.appendChild(textContainer);
     container.appendChild(consoleCard);
     shadow.appendChild(container);
 
-    function setStepState(index, state) {
-      const stepEl = shadow.getElementById(`cc-step-${index}`);
-      if (!stepEl) return;
-      
-      const iconContainer = stepEl.querySelector('.step-icon');
-      if (!iconContainer) return;
-      
-      stepEl.classList.remove('active', 'completed');
-      
-      if (state === 'pending') {
-        iconContainer.innerHTML = '<div class="dot"></div>';
-      } else if (state === 'active') {
-        stepEl.classList.add('active');
-        iconContainer.innerHTML = '<div class="spinner"></div>';
-      } else if (state === 'completed') {
-        stepEl.classList.add('completed');
-        iconContainer.innerHTML = `
-          <div class="check-circle">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-          </div>
-        `;
+    const STATES = {
+      detecting: {
+        rgb: '59, 130, 246',
+        title: 'Analyzing Platform',
+        subtitle: 'Analyzing LLM workspace environment layout...',
+        icon: `
+          <svg class="cc-spin-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" opacity="0.3"></circle>
+            <path d="M12 2a10 10 0 0 1 10 10"></path>
+          </svg>
+        `
+      },
+      locating: {
+        rgb: '139, 92, 246',
+        title: 'Aligning History',
+        subtitle: 'Scrolling chat viewport to locate conversation start...',
+        icon: `
+          <svg class="cc-bounce-up-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="20" x2="12" y2="4"></line>
+            <polyline points="5 11 12 4 19 11"></polyline>
+          </svg>
+        `
+      },
+      scraping: {
+        rgb: '6, 182, 212',
+        title: 'Parsing Dialogue',
+        subtitle: 'Extracting dialogue turns and rich structural Markdown...',
+        icon: `
+          <svg class="cc-pulse-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+          </svg>
+        `
+      },
+      formatting: {
+        rgb: '245, 158, 11',
+        title: 'Synthesizing Context',
+        subtitle: 'Compiling and optimizing context data structures...',
+        icon: `
+          <svg class="cc-sparkle-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L14.8 9.2L22 12L14.8 14.8L12 22L9.2 14.8L2 12L9.2 9.2L12 2Z"></path>
+          </svg>
+        `
+      },
+      completed: {
+        rgb: '16, 185, 129',
+        title: 'Scraped Successfully',
+        subtitle: 'Conversation context fully prepared for handoff.',
+        icon: `
+          <svg class="cc-bounce-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        `
+      },
+      failed: {
+        rgb: '239, 68, 68',
+        title: 'Scraping Failed',
+        subtitle: 'No conversation elements detected on this page.',
+        icon: `
+          <svg class="cc-shake-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        `
       }
+    };
+
+    function setStepState(stateKey, customSubtitle = null) {
+      const config = STATES[stateKey];
+      if (!config) return;
+      
+      consoleCard.style.setProperty('--active-rgb', config.rgb);
+      iconInner.innerHTML = config.icon;
+      titleDiv.textContent = config.title;
+      subtitleDiv.textContent = customSubtitle || config.subtitle;
     }
 
-    // Set initial states
-    setStepState(0, 'active');
-    setStepState(1, 'pending');
-    setStepState(2, 'pending');
-    setStepState(3, 'pending');
-    setStepState(4, 'pending');
+    // Set initial state
+    setStepState('detecting');
 
-    // Trigger state change via CSS transition class
     requestAnimationFrame(() => {
       container.classList.add('agent-active');
     });
 
     let isFinished = false;
-    let timeouts = [];
-
-    // Step transitions sequence
-    timeouts.push(setTimeout(() => {
-      if (isFinished) return;
-      setStepState(0, 'completed');
-      setStepState(1, 'active');
-    }, 450));
-    
-    timeouts.push(setTimeout(() => {
-      if (isFinished) return;
-      setStepState(1, 'completed');
-      setStepState(2, 'active');
-    }, 900));
-    
-    timeouts.push(setTimeout(() => {
-      if (isFinished) return;
-      setStepState(2, 'completed');
-      setStepState(3, 'active');
-    }, 1450));
 
     function cleanup() {
       container.classList.remove('agent-active');
@@ -1553,57 +1937,22 @@
         if (host.parentNode) {
           host.remove();
         }
-      }, 350);
+      }, 450);
     }
 
     return {
+      setState: (stateKey) => {
+        setStepState(stateKey);
+      },
       success: () => {
         isFinished = true;
-        timeouts.forEach(clearTimeout);
-        
-        badge.className = 'status-badge completed';
-        label.textContent = 'COMPLETED';
-
-        // Set all to completed
-        setStepState(0, 'completed');
-        setStepState(1, 'completed');
-        setStepState(2, 'completed');
-        setStepState(3, 'completed');
-        setStepState(4, 'completed');
-        setTimeout(cleanup, 600);
+        setStepState('completed');
+        setTimeout(cleanup, 1200);
       },
       fail: (errorMsg) => {
         isFinished = true;
-        timeouts.forEach(clearTimeout);
-        
-        badge.className = 'status-badge failed';
-        label.textContent = 'FAILED';
-        
-        // Find first step that isn't completed and mark as failed
-        for (let i = 0; i < 5; i++) {
-          const stepEl = shadow.getElementById(`cc-step-${i}`);
-          if (stepEl && !stepEl.classList.contains('completed')) {
-            stepEl.classList.add('active');
-            stepEl.style.color = '#ef4444';
-            const icon = stepEl.querySelector('.step-icon');
-            if (icon) {
-              icon.innerHTML = `
-                <div class="cross-circle">
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                  </svg>
-                </div>
-              `;
-            }
-            const text = stepEl.querySelector('.step-text');
-            if (text) {
-              text.textContent = `${text.textContent.replace('...', '')} failed: ${errorMsg}`;
-            }
-            break;
-          }
-        }
-        setTimeout(cleanup, 2500);
+        setStepState('failed', errorMsg);
+        setTimeout(cleanup, 4500);
       }
     };
   }
@@ -1698,11 +2047,11 @@ Please confirm you have the full context above and are ready to continue the con
   let dragEnterCount = 0; // counter to handle child dragenter/dragleave
 
   const PLATFORM_COLORS = {
-    claude:     { primary: '#d97752', glow: 'rgba(217, 119, 82, 0.35)', bg: 'rgba(217, 119, 82, 0.06)' },
-    chatgpt:    { primary: '#10b981', glow: 'rgba(16, 185, 129, 0.35)',  bg: 'rgba(16, 185, 129, 0.06)' },
-    gemini:     { primary: '#3b82f6', glow: 'rgba(59, 130, 246, 0.35)',  bg: 'rgba(59, 130, 246, 0.06)' },
-    grok:       { primary: '#f4f4f5', glow: 'rgba(244, 244, 245, 0.25)', bg: 'rgba(244, 244, 245, 0.04)' },
-    perplexity: { primary: '#0ea5e9', glow: 'rgba(14, 165, 233, 0.35)',  bg: 'rgba(14, 165, 233, 0.06)' },
+    claude:     { primary: '#d97752', rgb: '217, 119, 82', glow: 'rgba(217, 119, 82, 0.35)', bg: 'rgba(217, 119, 82, 0.06)' },
+    chatgpt:    { primary: '#10b981', rgb: '16, 185, 129', glow: 'rgba(16, 185, 129, 0.35)',  bg: 'rgba(16, 185, 129, 0.06)' },
+    gemini:     { primary: '#3b82f6', rgb: '59, 130, 246', glow: 'rgba(59, 130, 246, 0.35)',  bg: 'rgba(59, 130, 246, 0.06)' },
+    grok:       { primary: '#f4f4f5', rgb: '244, 244, 245', glow: 'rgba(244, 244, 245, 0.25)', bg: 'rgba(244, 244, 245, 0.04)' },
+    perplexity: { primary: '#0ea5e9', rgb: '14, 165, 233', glow: 'rgba(14, 165, 233, 0.35)',  bg: 'rgba(14, 165, 233, 0.06)' },
   };
 
   // Platform icon SVGs (small)
@@ -2479,13 +2828,32 @@ Please confirm you have the full context above and are ready to continue the con
         try {
           activeScrapeTextCache = new WeakMap();
           startScrapingSession();
+
+          // Wait for DOM to settle (handles lazy loading / streaming responses)
+          await waitForDomSettled(document.body, 600, 5000);
+
+          // Handle virtualized / lazy-loaded scroll containers
+          const chatRoot = document.querySelector(
+            'main, [role="main"], [role="log"], [class*="conversation"], [class*="chat-window"]'
+          );
+          if (chatRoot) {
+            anim.setState('locating');
+            await scrollToLoadAll(chatRoot);
+          }
+
+          anim.setState('scraping');
           const scraper = SCRAPERS[platform];
           if (!scraper) {
             anim.fail('Unsupported platform');
             sendResponse({ success: false, error: `No scraper for platform: ${platform}` });
             return;
           }
+
+          await sleep(350); // Fluid animation transition beat
           const { messages, title } = scraper();
+          
+          anim.setState('formatting');
+
           if (!messages || messages.length === 0) {
             anim.fail('No messages found');
             sendResponse({ success: false, error: 'No conversation found. Make sure you have an active conversation open on this page.' });
@@ -2502,6 +2870,7 @@ Please confirm you have the full context above and are ready to continue the con
             delete msg.element;
           });
           
+          await sleep(400); // Polished animation synthesis delay
           anim.success();
           sendResponse({
             success: true,
