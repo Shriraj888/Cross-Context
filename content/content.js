@@ -45,6 +45,7 @@
   let isSessionActive = false;
   let tempStyle = null;
   let activeScrapeTextCache = null;
+  let isInjectionActive = false;
 
   function startScrapingSession() {
     if (isSessionActive) return;
@@ -2931,8 +2932,15 @@ Please confirm you have the full context above and are ready to continue the con
     }
 
     if (message.type === 'DO_INJECT') {
+      if (isInjectionActive) {
+        sendResponse({ success: true, info: 'Injection already in progress or completed' });
+        return true;
+      }
+      isInjectionActive = true;
+
       const injector = INJECTORS[message.targetPlatform];
       if (!injector) {
+        isInjectionActive = false;
         sendResponse({ success: false, error: `No injector for: ${message.targetPlatform}` });
         return true;
       }
@@ -2942,11 +2950,13 @@ Please confirm you have the full context above and are ready to continue the con
         if (result?.success) {
           anim.success(message.targetPlatform);
         } else {
+          isInjectionActive = false;
           anim.fail(result?.error || 'Injection failed');
         }
         chrome.storage.local.remove('pendingInjection');
         sendResponse(result);
       }).catch(err => {
+        isInjectionActive = false;
         anim.fail(err.message || 'Injection failed');
         sendResponse({ success: false, error: err.message });
       });
@@ -2988,6 +2998,7 @@ Please confirm you have the full context above and are ready to continue the con
   // ════════════════════════════════════════════
 
   async function checkPendingInjection() {
+    if (isInjectionActive) return;
     try {
       const { pendingInjection } = await chrome.storage.local.get('pendingInjection');
       if (!pendingInjection) return;
@@ -2998,10 +3009,15 @@ Please confirm you have the full context above and are ready to continue the con
 
       if (!isRecent || !isTarget) return;
 
+      isInjectionActive = true; // Lock immediately!
+
       await sleep(1500); // wait for page to render
 
       const injector = INJECTORS[targetPlatform];
-      if (!injector) return;
+      if (!injector) {
+        isInjectionActive = false;
+        return;
+      }
 
       const anim = runInjectionAnimation(context.platform);
       const formatted = formatContextPrompt(context, targetPlatform);
@@ -3011,15 +3027,18 @@ Please confirm you have the full context above and are ready to continue the con
         if (result?.success) {
           anim.success(targetPlatform);
         } else {
+          isInjectionActive = false;
           anim.fail(result?.error || 'Injection failed');
         }
       } catch (err) {
+        isInjectionActive = false;
         anim.fail(err.message || 'Injection failed');
       }
 
       await chrome.storage.local.remove('pendingInjection');
 
     } catch (err) {
+      isInjectionActive = false;
       console.error('Cross Context: Auto-inject failed:', err);
     }
   }
