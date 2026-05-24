@@ -749,6 +749,27 @@ function renderPreviewContent(ctx) {
       return `<ul class="ai-bullet-list">${arr.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
     };
 
+    // Build Priority memories list helpers
+    const buildPriorityMemoriesList = (memories) => {
+      if (!memories || !memories.length) return `<span class="ai-no-data">None scored</span>`;
+      return `
+        <div class="ai-priority-list-group">
+          ${memories.map(m => {
+            const scoreClass = m.priority_score >= 8 ? 'high' : (m.priority_score >= 5 ? 'medium' : 'low');
+            return `
+              <div class="ai-priority-memory-item flex-col">
+                <div class="ai-priority-memory-header">
+                  <span class="ai-priority-badge ${scoreClass}">Score ${m.priority_score}/10</span>
+                  <span class="ai-priority-reason">${escapeHtml(m.priority_reason)}</span>
+                </div>
+                <div class="ai-priority-memory-body">${escapeHtml(m.content)}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    };
+
     const buildCodeSnippets = (arr) => {
       if (!arr || !arr.length) return '';
       return `
@@ -797,25 +818,25 @@ function renderPreviewContent(ctx) {
     }
 
     // Prepare token reduction metadata
-    const tr = e.token_reduction_summary || { estimated_original_tokens: 0, estimated_compressed_tokens: 0, reduction_percentage: 0 };
-    const score = e.context_confidence_score || 0;
+    const ds = e.deduplication_stats || { duplicate_items_removed: 0, merged_concepts: 0, estimated_token_reduction_percent: 0 };
+    const q = e.context_quality || { signal_to_noise_ratio: 0, context_completeness: 0, transfer_readiness_score: 0 };
 
     previewContentAi.innerHTML = `
       <!-- Token Compression Panel -->
-      <div class="ai-compression-card">
+      <div class="ai-compression-card upgraded-card">
         <div class="ai-compression-stat">
-          <span class="ai-compression-label">Compression</span>
-          <span class="ai-compression-value">${tr.reduction_percentage ? tr.reduction_percentage.toFixed(1) : '0.0'}%</span>
+          <span class="ai-compression-label">Token Saving</span>
+          <span class="ai-compression-value">${ds.estimated_token_reduction_percent ? ds.estimated_token_reduction_percent.toFixed(1) : '0.0'}%</span>
         </div>
         <div class="ai-compression-divider"></div>
         <div class="ai-compression-stat">
-          <span class="ai-compression-label">Confidence</span>
-          <span class="ai-compression-value">${score}%</span>
+          <span class="ai-compression-label">Signal To Noise</span>
+          <span class="ai-compression-value">${q.signal_to_noise_ratio ? q.signal_to_noise_ratio.toFixed(1) : '0.0'}:1</span>
         </div>
         <div class="ai-compression-divider"></div>
         <div class="ai-compression-stat">
-          <span class="ai-compression-label">Compressed Size</span>
-          <span class="ai-compression-value">${tr.estimated_compressed_tokens ? tr.estimated_compressed_tokens : '0'} tkn</span>
+          <span class="ai-compression-label">Transfer Ready</span>
+          <span class="ai-compression-value">${q.transfer_readiness_score ? q.transfer_readiness_score : '0'}%</span>
         </div>
       </div>
 
@@ -836,6 +857,21 @@ function renderPreviewContent(ctx) {
       </div>
 
       <div class="ai-section">
+        <span class="ai-section-title">Conversation Classifications</span>
+        ${buildChips(e.conversation_type)}
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">PHASE 1 — Priority Memories List</span>
+        ${buildPriorityMemoriesList(e.priority_memories)}
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">PHASE 2 — Deduplicated Contexts</span>
+        ${buildBulletList(e.deduplicated_context)}
+      </div>
+
+      <div class="ai-section">
         <span class="ai-section-title">Technical Architecture & Stack</span>
         ${buildChips(e.technical_stack)}
       </div>
@@ -851,21 +887,47 @@ function renderPreviewContent(ctx) {
           ${buildChips(e.constraints)}
         </div>
         <div class="ai-section">
-          <span class="ai-section-title">Active Files</span>
-          ${buildChips(e.files_mentioned)}
+          <span class="ai-section-title">Low Priority Context Items Pruned</span>
+          <div class="ai-tag-chip badge-failed" style="width: fit-content;">${e.removed_low_priority_context_count || 0} entries</div>
         </div>
       </div>
 
-      ${buildCodeSnippets(e.important_code_snippets)}
+      ${buildCodeSnippets(e.important_code)}
 
       <div class="ai-section">
-        <span class="ai-section-title">Errors & Attempted Solves</span>
+        <span class="ai-section-title">Errors & Issues Tracked</span>
         ${buildBulletList(e.errors_and_issues)}
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">Successful Solutions</span>
+        ${buildBulletList(e.successful_solutions)}
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">Failed Approaches to Avoid</span>
+        ${buildBulletList(e.failed_attempts)}
       </div>
 
       <div class="ai-section">
         <span class="ai-section-title">Pending Action Items</span>
         ${buildBulletList(e.pending_tasks)}
+      </div>
+
+      <div class="ai-grid-two-col">
+        <div class="ai-section">
+          <span class="ai-section-title">Developer Preferences</span>
+          ${buildBulletList(e.user_preferences)}
+        </div>
+        <div class="ai-section">
+          <span class="ai-section-title">Temporary context</span>
+          ${buildBulletList(e.temporary_context)}
+        </div>
+      </div>
+
+      <div class="ai-section">
+        <span class="ai-section-title">Long Term Project Memory</span>
+        ${buildBulletList(e.long_term_memory)}
       </div>
 
       <div class="ai-section">
