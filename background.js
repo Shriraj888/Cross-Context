@@ -305,6 +305,62 @@ function arrayBufferToBase64(arrayBuffer) {
 // ──────────────────────────────────────────────
 // Gemini API Context Synthesis Pipeline
 // ──────────────────────────────────────────────
+
+function compressTranscriptForApi(messages) {
+  const MAX_FULL_MESSAGES = 8; // keep last 8 messages fully intact
+  const len = messages.length;
+  
+  return messages.map((msg, idx) => {
+    const isRecent = idx >= len - MAX_FULL_MESSAGES;
+    const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
+    let content = msg.content || '';
+
+    if (isRecent) {
+      return `\n[${roleLabel}]:\n${content}\n`;
+    }
+
+    // Omit short conversational fluff in older messages
+    const cleanText = content.trim().toLowerCase();
+    if (cleanText.length < 25) {
+      const isFluff = /^(hi|hello|hey|thanks|thank you|ok|okay|yes|no|perfect|awesome|sure|done|sounds good|agree)/.test(cleanText);
+      if (isFluff) {
+        return ''; // filters out completely
+      }
+    }
+
+    // Compress code blocks in older messages
+    content = content.replace(/```([\s\S]*?)```/g, (match, code) => {
+      if (code.length > 200) {
+        const lines = code.trim().split('\n');
+        if (lines.length > 6) {
+          const firstLines = lines.slice(0, 3).join('\n');
+          const lastLines = lines.slice(-3).join('\n');
+          return `\`\`\`\n${firstLines}\n... [${lines.length - 6} lines of code omitted for token optimization] ...\n${lastLines}\n\`\`\``;
+        }
+        return `\`\`\`\n[Code block omitted for token optimization]\n\`\`\``;
+      }
+      return match;
+    });
+
+    // Truncate very long older messages
+    if (content.length > 1500) {
+      content = content.substring(0, 1500) + '\n... [Remaining text truncated for token optimization] ...';
+    }
+
+    return `\n[${roleLabel}]:\n${content}\n`;
+  }).filter(Boolean).join('');
+}
+
+const SYSTEM_INSTRUCTIONS = `You are a Context Distillation and Transfer Engine. Your goal is to transform noisy multi-turn LLM conversations into a clean, structured, token-efficient JSON memory object for cross-LLM transfer.
+
+Please execute:
+1. Assign priority (1-10) to key memories (tech stack, requirements, decisions, errors). Limit priority_memories array to max 5-8 high-priority items.
+2. Deduplicate repeated explanations/code. Keep only the most complete version. Limit deduplicated_context array to max 5 items.
+3. Distill and compress context, removing conversational fluff.
+4. Classify conversation types (Coding, Debugging, Research, Brainstorming, Planning, Studying, Writing, Architecture Design).
+5. Generate a concise title (max 6-8 words) and an optimized handoff prompt starting with "[🔄 AI-Enhanced Cross Context Transfer]" that synthesizes active state, variables, errors, code files, and asks for user direction.
+Limit all other arrays in the output JSON to a maximum of 5-6 highly relevant items each to maintain token efficiency.`;
+
 async function runGeminiEnhancement(contextId) {
   try {
     // 1. Retrieve latest contexts and settings
@@ -326,143 +382,8 @@ async function runGeminiEnhancement(contextId) {
     }
 
     // 2. Build the text prompt representing the chat history
-    let promptText = `You are an advanced AI Context Distillation and Transfer Engine.
-
-Your purpose is to transform noisy multi-turn LLM conversations into a clean, structured, token-efficient portable memory object for cross-LLM transfer.
-
-You are NOT a normal summarizer.
-
-You must execute the following five phases:
-
----
-
-## PHASE 1 — CONTEXT PRIORITY SCORING
-
-Analyze every message and assign a priority score.
-
-Priority Levels:
-
-HIGH PRIORITY (Preserve ALL):
-* project requirements
-* architecture decisions
-* technical stack
-* user goals
-* unresolved issues
-* debugging context
-* constraints
-* API usage
-* code logic
-* user preferences
-* important reasoning chains
-* implementation plans
-* successful solutions
-* failed approaches worth avoiding
-
-MEDIUM PRIORITY (Compress):
-* explanations
-* feature discussions
-* brainstorming
-* partial implementation ideas
-* optimization discussions
-
-LOW PRIORITY (Remove unless uniquely useful):
-* greetings
-* filler conversation
-* conversational acknowledgements
-* repeated confirmations
-* jokes
-* redundant assistant explanations
-* duplicated summaries
-
-Generate a score from 1–10 for every extracted memory item in the "priority_memories" list, describing the reason for its score.
-
----
-
-## PHASE 2 — SEMANTIC DEDUPLICATION
-
-The conversation may contain repeated information.
-
-You MUST detect:
-* repeated explanations
-* repeated architecture discussions
-* repeated code snippets
-* repeated debugging information
-* repeated user goals
-* repeated decisions
-
-Deduplication Rules:
-1. Merge semantically identical information.
-2. Preserve the BEST and MOST COMPLETE version.
-3. Remove duplicate phrasing.
-4. Store recurring concepts only once.
-5. Track repetition frequency internally.
-
-Fill the "deduplicated_context" list with these merged, high-signal entries.
-
----
-
-## PHASE 3 — CONTEXT DISTILLATION
-
-Extract and preserve ONLY:
-* core project understanding
-* active tasks
-* unresolved blockers
-* technical decisions
-* implementation details
-* user intent
-* user preferences
-* architecture
-* current objective
-* critical reasoning continuity
-
-Compress aggressively while preserving meaning.
-
----
-
-## PHASE 4 — INTELLIGENT CONTEXT CLASSIFICATION
-
-Automatically classify "conversation_type" as one or more of:
-* Coding
-* Debugging
-* Research
-* Brainstorming
-* Planning
-* Studying
-* Writing
-* Architecture Design
-
-Detect:
-* current focus
-* long-term project memory
-* temporary context
-* reusable developer preferences
-* blockers
-* unresolved dependencies
-
----
-
-## ADDITIONAL METADATA
-
-In addition to the distillation fields, you must generate:
-1. "title": a very concise summary (max 6-8 words) of the conversation context to serve as the saved context card title.
-2. "handoffPrompt": a highly efficient handoff prompt starting with "[🔄 AI-Enhanced Cross Context Transfer]". This prompt must:
-   - Synthesize the conversation so the next LLM knows the exact state, codebase, and variables.
-   - Describe what is shown in any uploaded images/diagrams so the next LLM has visual awareness.
-   - Ask the next LLM to confirm receipt of context and prompt the user for the next action. Do NOT re-introduce itself.
-
-Here is the conversation history:
-`;
-
-    context.messages.slice(-MAX_GEMINI_MESSAGES).some(msg => {
-      const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
-      const line = `\n[${roleLabel}]:\n${String(msg.content || '')}\n`;
-      if (promptText.length + line.length > MAX_GEMINI_PROMPT_CHARS) {
-        promptText += '\n[Transcript truncated to keep AI compression fast.]';
-        return true;
-      }
-      promptText += line;
-      return false;
-    });
+    const slicedMessages = context.messages.slice(-MAX_GEMINI_MESSAGES);
+    const promptText = compressTranscriptForApi(slicedMessages);
 
     const parts = [{ text: promptText }];
 
@@ -497,7 +418,11 @@ Here is the conversation history:
       },
       body: JSON.stringify({
         contents: [{ parts }],
+        systemInstruction: {
+          parts: [{ text: SYSTEM_INSTRUCTIONS }]
+        },
         generationConfig: {
+          temperature: 0.2,
           responseMimeType: "application/json",
           responseSchema: {
             type: "OBJECT",
