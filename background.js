@@ -213,7 +213,18 @@ async function handleScrapeRequest(message, sendResponse) {
       type: 'DO_SCRAPE',
       isAiScrape: !!message.isAiScrape
     });
-    sendResponse(results);
+
+    if (results?.success && results.context) {
+      // Save directly from background so it survives popup closing!
+      let saveResult = null;
+      await handleSaveContext(
+        { ...results.context, url: activeTab.url, isAiScrape: !!message.isAiScrape },
+        (res) => { saveResult = res; }
+      );
+      sendResponse(saveResult || results);
+    } else {
+      sendResponse(results);
+    }
   } catch (err) {
     sendResponse({
       success: false,

@@ -666,25 +666,14 @@ async function captureConversation(isAiScrape) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    // Send scrape request to content script via background
-    const result = await sendMessage({ type: 'SCRAPE_REQUEST', isAiScrape });
-
-    if (!result?.success) {
-      showToast(result?.error || 'Could not scrape conversation. Make sure you have a conversation open.', 'error');
-      return;
-    }
-
-    // Save to storage
-    const saveResult = await sendMessage({
-      type: 'SAVE_CONTEXT',
-      payload: { ...result.context, url: tab.url, isAiScrape }
-    });
+    // Send scrape request (which now also automatically saves in background!)
+    const saveResult = await sendMessage({ type: 'SCRAPE_REQUEST', isAiScrape });
 
     if (saveResult?.success) {
       savedContexts = [saveResult.context, ...savedContexts.filter(c => c.id !== saveResult.context.id)];
       renderContexts();
       
-      const msgs = result.context.messages;
+      const msgs = saveResult.context.messages;
       const userCount = msgs.filter(m => m.role === 'user').length;
       const assistantCount = msgs.filter(m => m.role === 'assistant').length;
       const platformName = PLATFORMS[currentTabPlatform]?.name;
@@ -708,7 +697,7 @@ async function captureConversation(isAiScrape) {
       if (saveResult?.error === 'quota_exceeded') {
         showToast('⚠️ Storage limit reached! Please delete past contexts to free up space.', 'error');
       } else {
-        showToast(saveResult?.error || 'Failed to save context', 'error');
+        showToast(saveResult?.error || 'Could not scrape conversation. Make sure you have a conversation open.', 'error');
       }
     }
 
