@@ -2031,9 +2031,187 @@
       const pending = Array.isArray(e.pending_tasks) ? e.pending_tasks.map(pt => `• ${pt}`).join('\n') : '';
       const handoff = e.handoffPrompt || '';
 
+      // List builders helper
+      const bulletJoin = (arr) => (Array.isArray(arr) && arr.length) ? arr.map(x => `• ${x}`).join('\n') : 'None recorded';
+      const codeBlocksJoin = (arr) => {
+        if (!Array.isArray(arr) || !arr.length) return 'No snippets recorded';
+        return arr.map((code, i) => `--- Snippet #${i + 1} ---\n${code}`).join('\n\n');
+      };
+
+      // Detect Dominant Intent
+      const types = Array.isArray(e.conversation_type) ? e.conversation_type.map(t => t.toLowerCase()) : [];
+      let dominantIntent = 'general';
+      if (types.includes('coding') || types.includes('architecture design')) {
+        dominantIntent = 'coding';
+      } else if (types.includes('debugging')) {
+        dominantIntent = 'debugging';
+      } else if (types.includes('brainstorming') || types.includes('planning')) {
+        dominantIntent = 'brainstorming';
+      } else if (types.includes('research') || types.includes('studying')) {
+        dominantIntent = 'research';
+      } else if (types.includes('writing')) {
+        dominantIntent = 'writing';
+      }
+
+      const divider = '═'.repeat(60);
+
+      if (dominantIntent === 'coding') {
+        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Coding]
+You are continuing a software development and implementation session started on ${src}.
+The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+
+📋 Project Summary:
+${summary}
+
+🎯 Current Coding Objective:
+- Objective: ${task}
+- Specific Intent: ${intent}
+
+💻 Tech Stack & Active Files:
+- Stack: ${tech}
+- Target Files: ${files}
+
+📁 Key Code & Configurations:
+${codeBlocksJoin(e.important_code)}
+
+🔑 Architecture Decisions:
+${decisions}
+
+⚠️ Constraints & Limits:
+${constraints}
+
+📋 Pending Actions:
+${pending}
+
+${divider}
+🚀 Optimized Handoff Prompt & Instructions:
+${handoff}`;
+      }
+
+      if (dominantIntent === 'debugging') {
+        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Debugging]
+You are continuing a critical software debugging session started on ${src}.
+The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+
+📋 Project Summary:
+${summary}
+
+🎯 Core Debugging Target:
+- Objective: ${task}
+- Intent: ${intent}
+
+❌ Tracked Errors & Issues:
+${bulletJoin(e.errors_and_issues)}
+
+💡 Attempted Solves & Approaches:
+${bulletJoin(e.failed_attempts)}
+
+✅ Successful Solutions:
+${bulletJoin(e.successful_solutions)}
+
+💻 Tech Stack & Active Files:
+- Stack: ${tech}
+- Target Files: ${files}
+
+📁 Error-Prone Code Snippets:
+${codeBlocksJoin(e.important_code)}
+
+${divider}
+🚀 Optimized Handoff Prompt & Instructions:
+${handoff}`;
+      }
+
+      if (dominantIntent === 'brainstorming') {
+        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Brainstorming & Planning]
+You are continuing a brainstorming, ideation, or product planning session started on ${src}.
+The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+
+📋 Core Topic/Overview:
+${summary}
+
+🎯 Brainstorming Goal:
+- Target Objective: ${task}
+- Intent/Vision: ${intent}
+
+💡 Deduplicated Key Concepts (Phase 2):
+${bulletJoin(e.deduplicated_context)}
+
+💭 Long Term Project Memory:
+${bulletJoin(e.long_term_memory)}
+
+🔑 Key Choices & Decisions:
+${decisions}
+
+⚠️ Constraints & Limits:
+${constraints}
+
+📋 Next Planning Actions:
+${pending}
+
+${divider}
+🚀 Optimized Handoff Prompt & Instructions:
+${handoff}`;
+      }
+
+      if (dominantIntent === 'research') {
+        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Research & Studying]
+You are continuing a conceptual research or academic study session started on ${src}.
+The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+
+📋 Research Focus:
+${summary}
+
+🎯 Study Target:
+- Focus Area: ${task}
+- Knowledge Goal: ${intent}
+
+💡 Deduplicated Core Concepts:
+${bulletJoin(e.deduplicated_context)}
+
+💭 Long Term Project Memory:
+${bulletJoin(e.long_term_memory)}
+
+🤖 AI Inferred Intelligence Layer:
+${bulletJoin(e.ai_inferred_context)}
+
+⚙️ Developer/User Preferences:
+${bulletJoin(e.user_preferences)}
+
+${divider}
+🚀 Optimized Handoff Prompt & Instructions:
+${handoff}`;
+      }
+
+      if (dominantIntent === 'writing') {
+        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Composition & Writing]
+You are continuing a text composition or writing session started on ${src}.
+The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+
+📋 Narrative/Content Overview:
+${summary}
+
+🎯 Writing Objective:
+- Current Target: ${task}
+- Creative Intent: ${intent}
+
+⚙️ Style Guidelines & Preferences:
+${bulletJoin(e.user_preferences)}
+
+💡 Synthesized Ideas & Contexts:
+${bulletJoin(e.deduplicated_context)}
+
+📋 Next Composition Steps:
+${pending}
+
+${divider}
+🚀 Optimized Handoff Prompt & Instructions:
+${handoff}`;
+      }
+
+      // General fallback
       return `[🔄 AI-Enhanced Cross Context Transfer]
 You are continuing a conversation that was started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Intelligence Engine.
+The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
 
 📋 Project Summary:
 ${summary}
@@ -2055,53 +2233,251 @@ ${constraints}
 📋 Pending Tasks:
 ${pending}
 
-${'═'.repeat(60)}
+${divider}
 🚀 Optimized Handoff Prompt & Instructions:
 ${handoff}`;
     }
 
-    const MAX_TURNS  = 40;
-    const CHAR_LIMIT = 80000;
+    // ──────────────────────────────────────────────────────────────
+    // DETERMINISTIC FALLBACK — Run Memory Graph & Deduplication Engine locally
+    // ──────────────────────────────────────────────────────────────
+    class LocalContextIntelligenceEngine {
+      constructor() {
+        this.nodes = new Map();
+        this.edges = [];
+        this.priorityMemories = [];
+        this.executionContext = {
+          topicsDiscussed: new Set(),
+          solvedProblems: new Set(),
+          failedApproaches: new Set(),
+          currentFocus: ''
+        };
+      }
 
-    let msgs = [...context.messages];
-    let truncated = false;
+      scoreMessage(content, role) {
+        if (!content) return 0;
+        const hasCode = content.includes('```');
+        const highPatterns = [
+          /requirement/i, /architecture/i, /technical decision/i, /tech stack/i,
+          /todo/i, /active task/i, /unresolved/i, /error/i, /bug/i, /exception/i,
+          /debugging/i, /blocker/i, /user preference/i, /conventions/i, /decision/i,
+          /how to/i, /solves/i, /fails/i, /attempt/i, /config/i
+        ];
+        const lowPatterns = [
+          /^hello/i, /^hi /i, /^hey/i, /thanks/i, /thank you/i, /awesome/i,
+          /perfect/i, /ok/i, /confirm/i, /^yes$/i, /filler/i, /conversation fluff/i,
+          /helpful assistant/i
+        ];
+        let score = 5;
+        if (role === 'user') score += 1;
+        if (hasCode) score += 3;
+        let highMatchCount = 0;
+        highPatterns.forEach(pat => { if (pat.test(content)) highMatchCount++; });
+        score += Math.min(highMatchCount * 1.5, 4);
+        let lowMatchCount = 0;
+        lowPatterns.forEach(pat => { if (pat.test(content)) lowMatchCount++; });
+        score -= Math.min(lowMatchCount * 2, 4);
+        return Math.max(1, Math.min(10, Math.round(score)));
+      }
 
-    if (msgs.length > MAX_TURNS) {
-      msgs = msgs.slice(msgs.length - MAX_TURNS);
-      truncated = true;
+      calculateJaccard(str1, str2) {
+        const getWords = (str) => new Set(str.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2));
+        const set1 = getWords(str1);
+        const set2 = getWords(str2);
+        if (set1.size === 0 || set2.size === 0) return 0;
+        let intersection = 0;
+        for (const item of set1) { if (set2.has(item)) intersection++; }
+        const union = set1.size + set2.size - intersection;
+        return intersection / union;
+      }
+
+      deduplicateItems(items) {
+        const canonicalList = [];
+        items.forEach(item => {
+          if (!item || item.trim().length < 5) return;
+          let merged = false;
+          for (let i = 0; i < canonicalList.length; i++) {
+            const canonical = canonicalList[i];
+            const similarity = this.calculateJaccard(item, canonical);
+            const isSub1 = item.toLowerCase().includes(canonical.toLowerCase()) && item.length < canonical.length * 2;
+            const isSub2 = canonical.toLowerCase().includes(item.toLowerCase()) && canonical.length < item.length * 2;
+            if (similarity > 0.45 || isSub1 || isSub2) {
+              if (item.length > canonical.length) { canonicalList[i] = item; }
+              merged = true;
+              break;
+            }
+          }
+          if (!merged) { canonicalList.push(item); }
+        });
+        return canonicalList;
+      }
+
+      addNode(id, type, label, properties = {}) {
+        if (!this.nodes.has(id)) { this.nodes.set(id, { type, label, properties }); }
+      }
+
+      addEdge(from, to, type) {
+        const exists = this.edges.some(e => e.from === from && e.to === to && e.type === type);
+        if (!exists && this.nodes.has(from) && this.nodes.has(to)) { this.edges.push({ from, to, type }); }
+      }
+
+      processConversation(messages) {
+        let messageIndex = 0;
+        this.addNode('project_root', 'PROJECT', 'Active Working Project', { description: 'Target transfer workspace' });
+
+        messages.forEach(msg => {
+          const content = msg.content || '';
+          const role = msg.role || 'user';
+          const score = this.scoreMessage(content, role);
+          const msgId = `msg_${messageIndex++}`;
+
+          if (content.toLowerCase().includes('solved') || content.toLowerCase().includes('fixed') || content.toLowerCase().includes('working now')) {
+            const sentenceMatch = content.match(/[^.!?]*?(?:solved|fixed)[^.!?]*/i);
+            if (sentenceMatch) this.executionContext.solvedProblems.add(sentenceMatch[0].trim());
+          }
+          if (content.toLowerCase().includes('avoid') || content.toLowerCase().includes('failed') || content.toLowerCase().includes('do not repeat')) {
+            const sentenceMatch = content.match(/[^.!?]*?(?:avoid|failed)[^.!?]*/i);
+            if (sentenceMatch) this.executionContext.failedApproaches.add(sentenceMatch[0].trim());
+          }
+
+          if (score >= 6) {
+            this.priorityMemories.push({
+              content: content.length > 150 ? content.substring(0, 150) + '...' : content,
+              priority_score: score,
+              priority_reason: role === 'user' ? 'Direct user requirement' : 'Developer instructions'
+            });
+          }
+
+          const techKeywords = ['react', 'next.js', 'node', 'vue', 'chrome extension', 'javascript', 'typescript', 'rust', 'actix-web', 'sqlx', 'css', 'vanilla css', 'flexbox', 'html', 'gemini', 'gemini api', 'tailwind'];
+          techKeywords.forEach(tech => {
+            if (content.toLowerCase().includes(tech)) {
+              const techId = `tech_${tech.replace(/\s+/g, '_')}`;
+              this.addNode(techId, 'TECH_STACK', tech.toUpperCase(), { name: tech });
+              this.addEdge(techId, 'project_root', 'IMPLEMENTED_WITH');
+              this.executionContext.topicsDiscussed.add(tech);
+            }
+          });
+
+          if (content.toLowerCase().includes('todo') || content.toLowerCase().includes('task') || content.toLowerCase().includes('objective')) {
+            const sentences = content.split(/[.!?\n]/);
+            sentences.forEach((s, idx) => {
+              if (s.toLowerCase().includes('todo') || s.toLowerCase().includes('task') || s.toLowerCase().includes('objective')) {
+                const taskId = `${msgId}_task_${idx}`;
+                const cleanLabel = s.replace(/[-*•]/g, '').trim();
+                if (cleanLabel.length > 10) {
+                  this.addNode(taskId, 'TASK', cleanLabel, { status: 'active' });
+                  this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
+                }
+              }
+            });
+          }
+
+          if (content.toLowerCase().includes('decided') || content.toLowerCase().includes('let\'s use') || content.toLowerCase().includes('we will use')) {
+            const sentences = content.split(/[.!?\n]/);
+            sentences.forEach((s, idx) => {
+              if (s.toLowerCase().includes('decided') || s.toLowerCase().includes('use')) {
+                const decId = `${msgId}_dec_${idx}`;
+                const cleanLabel = s.replace(/[-*•]/g, '').trim();
+                if (cleanLabel.length > 10) {
+                  this.addNode(decId, 'DECISION', cleanLabel);
+                  this.addEdge(decId, 'project_root', 'RELATED_TO');
+                }
+              }
+            });
+          }
+
+          if (content.toLowerCase().includes('error') || content.toLowerCase().includes('bug') || content.toLowerCase().includes('fail')) {
+            const sentences = content.split(/[.!?\n]/);
+            sentences.forEach((s, idx) => {
+              if (s.toLowerCase().includes('error') || s.toLowerCase().includes('bug') || s.toLowerCase().includes('fail')) {
+                const issueId = `${msgId}_issue_${idx}`;
+                const cleanLabel = s.replace(/[-*•]/g, '').trim();
+                if (cleanLabel.length > 10) {
+                  this.addNode(issueId, 'ISSUE', cleanLabel);
+                  this.addEdge(issueId, 'project_root', 'BLOCKED_BY');
+                }
+              }
+            });
+          }
+        });
+
+        const rawMemories = this.priorityMemories.map(m => m.content);
+        const dedupedMemories = this.deduplicateItems(rawMemories);
+        this.priorityMemories = this.priorityMemories.filter(m => dedupedMemories.includes(m.content));
+      }
+
+      getStructuredPacket() {
+        return {
+          system_context: 'Deterministic State Restoration & Continuity Protocol — Version 2.0',
+          priority_memory: this.priorityMemories.map(m => `[Score ${m.priority_score}/10] ${m.content}`).slice(0, 8),
+          active_tasks: Array.from(this.nodes.values()).filter(n => n.type === 'TASK').map(n => n.label),
+          unresolved_issues: Array.from(this.nodes.values()).filter(n => n.type === 'ISSUE').map(n => n.label),
+          important_decisions: Array.from(this.nodes.values()).filter(n => n.type === 'DECISION').map(n => n.label),
+          execution_context: {
+            topics_discussed: Array.from(this.executionContext.topicsDiscussed),
+            problems_solved: Array.from(this.executionContext.solvedProblems),
+            approaches_to_avoid: Array.from(this.executionContext.failedApproaches),
+            current_focus: Array.from(this.nodes.values()).filter(n => n.type === 'TASK').map(n => n.label)[0] || 'General System Implementation'
+          },
+          user_preferences: Array.from(this.nodes.values()).filter(n => n.type === 'PREFERENCE').map(n => n.label)
+        };
+      }
     }
 
-    let transcript = '';
-    let chars = 0;
-
-    for (const msg of msgs) {
-      const label = msg.role === 'user' ? '👤 User' : '🤖 Assistant';
-      const line  = `${label}:\n${msg.content}\n\n`;
-      if (chars + line.length > CHAR_LIMIT) { truncated = true; break; }
-      transcript += line;
-      chars += line.length;
-    }
+    const localEngine = new LocalContextIntelligenceEngine();
+    localEngine.processConversation(context.messages);
+    const packet = localEngine.getStructuredPacket();
 
     const src = PLATFORM_NAMES[context.platform] || context.platform;
-    const note = truncated ? `\n⚠️ Note: Partial history (last ${MAX_TURNS} turns shown due to length).\n` : '';
-    const div  = '═'.repeat(60);
+    const firstUser = context.messages.find(m => m.role === 'user');
+    const handoffHint = firstUser ? firstUser.content : 'Continue active working session';
+    const handoffTruncated = handoffHint.length > 300 ? handoffHint.substring(0, 300) + '...' : handoffHint;
 
-    return `[🔄 Cross Context Transfer]
-You are continuing a conversation that was started on ${src}.
-The user reached the free-tier limit there and needs your help to continue seamlessly.${note}
-Please read the conversation history below, then acknowledge you understand the context and are ready to help. Do NOT re-introduce yourself — just confirm you have the context.
+    return `[🔄 Cross Context Transfer — State Restoration Continuity Protocol]
+You are continuing a software engineering and collaborative session started on ${src}.
+The active conversation context has been compiled into a structured Memory Graph by our Context Intelligence Engine to enable seamless continuation and absolute technical continuity.
 
-${div}
-📋 Conversation History (${msgs.length} messages from ${src})
-${div}
+⚠️ COLLABORATOR CONTINUITY INSTRUCTIONS:
+1. CONTINUE INSTANTLY from the current state outlined below.
+2. DO NOT restart context, summarize the project, or re-explain topics.
+3. DO NOT re-introduce yourself or write conversational filler. Act as an active, ongoing pair-programmer/collaborator.
+4. Verify the active checklist and focus area and align immediately.
 
-${transcript.trim()}
+════════════════════════════════════════════════════════════
+📋 DETERMINISTIC STATE RESTORATION PACKET
+════════════════════════════════════════════════════════════
 
-${div}
-✅ End of conversation history from ${src}
-${div}
+⚙️ SYSTEM CONTEXT:
+${packet.system_context}
 
-Please confirm you have the full context above and are ready to continue the conversation.`;
+🧠 DISTILLED PRIORITY SPECIFICATIONS:
+${packet.priority_memory.map(m => `• ${m}`).join('\n') || 'None recorded'}
+
+🎯 ACTIVE TASKS Checklist:
+${packet.active_tasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
+
+❌ UNRESOLVED BLOCKERS & ISSUES:
+${packet.unresolved_issues.map(i => `• ${i}`).join('\n') || 'None active'}
+
+🔑 ARCHITECTURE & TECHNICAL DECISIONS:
+${packet.important_decisions.map(d => `• ${d}`).join('\n') || 'None recorded'}
+
+🔄 ACTIVE EXECUTION CONTEXT:
+- Current Focus Area: ${packet.execution_context.current_focus}
+- Core Topics Discussed: ${packet.execution_context.topics_discussed.join(', ') || 'None'}
+- Solved Problems & Closed Issues:
+${packet.execution_context.problems_solved.map(p => `  ✓ ${p}`).join('\n') || '  None'}
+- Failed Approaches to Avoid:
+${packet.execution_context.approaches_to_avoid.map(a => `  ⚠️ ${a}`).join('\n') || '  None'}
+
+⚙️ DEVELOPER PREFERENCES:
+${packet.user_preferences.map(p => `• ${p}`).join('\n') || 'None configured'}
+
+════════════════════════════════════════════════════════════
+🚀 CONTINUATION FOCUS & HANDOFF:
+${handoffTruncated}
+════════════════════════════════════════════════════════════
+Please confirm receipt of this context state. Acknowledge what tasks you are taking over, and ask the user what to focus on next to continue seamlessly.`;
   }
 
   // ════════════════════════════════════════════
