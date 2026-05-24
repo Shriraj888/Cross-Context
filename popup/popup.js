@@ -122,6 +122,7 @@ let currentPreviewId = null;
 let currentPreviewTab = 'ai-summary';
 let currentSearchQuery = '';
 let currentFilterPlatform = 'all';
+let pendingLoaderInterval = null;
 
 // ──────────────────────────────────────────
 // Init
@@ -130,6 +131,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   await detectCurrentTab();
   await loadContexts();
   await loadSettings();
+
+  // Listen for storage changes to auto-update cards and active preview modal in real-time
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.contexts) {
+      savedContexts = changes.contexts.newValue || [];
+      renderContexts();
+      if (currentPreviewId) {
+        const active = savedContexts.find(c => c.id === currentPreviewId);
+        if (active) {
+          renderPreviewContent(active);
+        } else {
+          closePreviewModal();
+        }
+      }
+    }
+  });
   
   if (window.location.protocol === 'file:' && savedContexts.length === 0) {
     savedContexts = [
@@ -305,9 +322,11 @@ function createContextCard(ctx) {
   let aiBadgeHtml = '';
   if (ctx.aiStatus === 'pending') {
     aiBadgeHtml = `
-      <div class="card-processing-badge" title="AI is distilling conversation context...">
-        <span class="premium-spinner"></span>
-        <span>Distilling...</span>
+      <div class="card-processing-badge" title="AI Context Engine is compiling conversation...">
+        <svg class="premium-sparkle-loader" viewBox="0 0 24 24" width="9" height="9" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2L14.7 9.3L22 12L14.7 14.7L12 22L9.3 14.7L2 12L9.3 9.3L12 2Z" />
+        </svg>
+        <span>Processing...</span>
       </div>
     `;
   } else if (ctx.aiStatus === 'success') {
@@ -719,6 +738,10 @@ function openPreviewModal(contextId) {
 function closePreviewModal() {
   previewModal.classList.add('hidden');
   currentPreviewId = null;
+  if (pendingLoaderInterval) {
+    clearInterval(pendingLoaderInterval);
+    pendingLoaderInterval = null;
+  }
 }
 
 function renderPreviewContent(ctx) {
@@ -732,24 +755,103 @@ function renderPreviewContent(ctx) {
     previewTabs.classList.remove('hidden');
 
     if (isAiPending) {
+      if (pendingLoaderInterval) {
+        clearInterval(pendingLoaderInterval);
+        pendingLoaderInterval = null;
+      }
+
       previewContentAi.innerHTML = `
         <div class="ai-preview-pending">
           <div class="ai-preview-pending-glow"></div>
           <div class="ai-preview-pending-content">
             <div class="premium-large-spinner">
-              <svg class="cc-spinner" viewBox="0 0 50 50" width="36" height="36" xmlns="http://www.w3.org/2000/svg">
-                <circle class="cc-spinner-bg" cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4.5" opacity="0.1"></circle>
-                <circle class="cc-spinner-path" cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"></circle>
+              <svg class="cc-spinner-orbit" viewBox="0 0 50 50" width="48" height="48">
+                <circle class="orbit-outer" cx="25" cy="25" r="20" fill="none" stroke="rgba(167, 139, 250, 0.12)" stroke-width="3"></circle>
+                <circle class="orbit-outer-path" cx="25" cy="25" r="20" fill="none" stroke="url(#orbit-grad-1)" stroke-width="3" stroke-linecap="round"></circle>
+                <circle class="orbit-inner" cx="25" cy="25" r="12" fill="none" stroke="rgba(219, 39, 119, 0.08)" stroke-width="2.5"></circle>
+                <circle class="orbit-inner-path" cx="25" cy="25" r="12" fill="none" stroke="url(#orbit-grad-2)" stroke-width="2.5" stroke-linecap="round"></circle>
+                <defs>
+                  <linearGradient id="orbit-grad-1" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#7c3aed" />
+                    <stop offset="100%" stop-color="#3b82f6" />
+                  </linearGradient>
+                  <linearGradient id="orbit-grad-2" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#db2777" />
+                    <stop offset="100%" stop-color="#7c3aed" />
+                  </linearGradient>
+                </defs>
               </svg>
             </div>
-            <div class="ai-pending-title">Distilling Context...</div>
-            <div class="ai-pending-subtitle">Gemini is parsing dialogue turns, identifying architecture decisions, and synthesizing a portable handoff prompt in the background.</div>
+            
+            <div class="ai-pending-title">Distillation Engine Active</div>
+            <div id="ai-pending-status-text" class="ai-pending-status-text">Ingesting conversation transcript...</div>
+            
+            <div class="ai-pending-steps">
+              <div class="pending-step active" id="step-ingest">
+                <span class="step-dot"></span>
+                <span>Ingesting Scraped Dialogue</span>
+              </div>
+              <div class="pending-step" id="step-analyze">
+                <span class="step-dot"></span>
+                <span>Extracting Key Decisions & Priorities</span>
+              </div>
+              <div class="pending-step" id="step-synthesize">
+                <span class="step-dot"></span>
+                <span>Synthesizing Context Handoff</span>
+              </div>
+            </div>
+            
             <div class="ai-pending-progress-track">
               <div class="ai-pending-progress-bar"></div>
             </div>
           </div>
         </div>
       `;
+
+      // Cycle status text and complete steps
+      const statuses = [
+        { text: "Ingesting conversation transcript...", step: "ingest" },
+        { text: "Pruning conversational filler...", step: "ingest" },
+        { text: "Extracting active code configurations...", step: "analyze" },
+        { text: "Parsing technical stack layers...", step: "analyze" },
+        { text: "Identifying key architecture decisions...", step: "analyze" },
+        { text: "Compiling priority scoring index...", step: "analyze" },
+        { text: "Deduplicating semantic context...", step: "synthesize" },
+        { text: "Synthesizing AI handoff prompt...", step: "synthesize" },
+        { text: "Finalizing state restoration packet...", step: "synthesize" }
+      ];
+
+      let currentStatusIdx = 0;
+      pendingLoaderInterval = setInterval(() => {
+        currentStatusIdx = (currentStatusIdx + 1) % statuses.length;
+        const current = statuses[currentStatusIdx];
+        
+        const textEl = document.getElementById('ai-pending-status-text');
+        if (textEl) {
+          textEl.textContent = current.text;
+        }
+
+        // Update step visual state based on active phase
+        const ingestEl = document.getElementById('step-ingest');
+        const analyzeEl = document.getElementById('step-analyze');
+        const synthesizeEl = document.getElementById('step-synthesize');
+
+        if (ingestEl && analyzeEl && synthesizeEl) {
+          if (current.step === "ingest") {
+            ingestEl.className = "pending-step active";
+            analyzeEl.className = "pending-step";
+            synthesizeEl.className = "pending-step";
+          } else if (current.step === "analyze") {
+            ingestEl.className = "pending-step completed";
+            analyzeEl.className = "pending-step active";
+            synthesizeEl.className = "pending-step";
+          } else if (current.step === "synthesize") {
+            ingestEl.className = "pending-step completed";
+            analyzeEl.className = "pending-step completed";
+            synthesizeEl.className = "pending-step active";
+          }
+        }
+      }, 1500);
     } else {
       const e = ctx.aiEnhanced;
 
