@@ -539,15 +539,41 @@ function compressTranscriptForApi(messages) {
   }).filter(Boolean).join('');
 }
 
-const SYSTEM_INSTRUCTIONS = `You are a Context Distillation and Transfer Engine. Your goal is to transform noisy multi-turn LLM conversations into a clean, structured, token-efficient JSON memory object for cross-LLM transfer.
+const SYSTEM_INSTRUCTIONS_PASS_1 = `You are a Technical Facts Extraction Engine. Your task is to extract factual details from the provided developer-AI conversation history.
+Focus strictly on objective details:
+1. technical_stack: The programming languages, frameworks, libraries, databases, and tooling mentioned.
+2. errors_and_issues: Specific error messages, compiler warnings, runtime exceptions, or buggy behaviors mentioned.
+3. architecture_decisions: Design decisions, library selections, architectural patterns chosen, or code organization guidelines.
+4. pending_tasks: Specific unresolved checklist items, TODOs, or next development steps explicitly or implicitly requested.
+5. important_code: Exact code snippets, configurations, or syntax that are highly relevant to the active problem or target solution.
+6. files_mentioned: Filenames, file paths, or directory names mentioned in the conversation.
+7. user_preferences: Expressed preferences of the user (e.g., preference for Vanilla CSS over Tailwind, clean/uncommented code, particular patterns).
+8. constraints: Technical or structural limitations, API quotas, performance bounds, or environment constraints.
+9. successful_solutions: Fixes, code snippets, or solutions that successfully solved a problem in the conversation.
+10. failed_attempts: Approaches, libraries, or configurations that were attempted but failed or were rejected.
+
+Do not summarize, do not synthesize, and do not write a handoff prompt. Extract only verified factual lists directly present in the text. Ensure each list has a maximum of 5-8 items of high accuracy.`;
+
+const SYSTEM_INSTRUCTIONS_PASS_2 = `You are a Context Synthesis and Handoff Packaging Engine.
+You are provided with:
+1. The raw developer-AI conversation transcript.
+2. A highly accurate structured JSON set of extracted facts (technical stack, errors, decisions, code, files, preferences, etc.).
+
+Your goal is to synthesize these inputs to produce an extremely high-quality, professional, and token-efficient state transfer packet for cross-LLM continuity.
 
 Please execute:
-1. Assign priority (1-10) to key memories (tech stack, requirements, decisions, errors). Limit priority_memories array to max 5-8 high-priority items.
-2. Deduplicate repeated explanations/code. Keep only the most complete version. Limit deduplicated_context array to max 5 items.
-3. Distill and compress context, removing conversational fluff.
-4. Classify conversation types (Coding, Debugging, Research, Brainstorming, Planning, Studying, Writing, Architecture Design).
-5. Generate a concise title (max 6-8 words) and an optimized handoff prompt in the 'handoffPrompt' field. Crucially, write the handoff prompt in the first-person user voice (e.g., "I need to next..." or "Please help me implement..."), avoiding any third-person meta-context like "The user wants..." or "You are continuing...". It should read as a direct briefing from the user specifying the immediate next task and requesting the model's next steps.
-Limit all other arrays in the output JSON to a maximum of 5-6 highly relevant items each to maintain token efficiency.`;
+1. Assign priority (1-10) to key memories (tech stack, requirements, decisions, errors) in the 'priority_memories' array. Limit to max 5-8 items.
+2. Deduplicate repeated explanations/code. Keep only the most complete version. Limit 'deduplicated_context' array to max 5 items.
+3. Classify conversation types (Coding, Debugging, Research, Brainstorming, Planning, Studying, Writing, Architecture Design).
+4. Generate a concise title (max 6-8 words) for the overall conversation.
+5. Generate a 'project_summary' summarizing the overall project or codebase.
+6. Generate a 'current_task' describing the immediate objective.
+7. Generate a 'user_intent' describing what the user wants to achieve.
+8. CRITICALLY, generate an optimized 'handoffPrompt' in the first-person user voice (e.g., "I am working on X. Here's where we stand: [...] I need you to help me next with [...]").
+   Avoid third-person meta-context like "The user wants..." or "You are continuing a session...". It should read as a direct briefing from the user specifying the immediate next task and requesting the model's next steps, synthesized directly from the extracted facts and transcript.
+9. Populate the remaining fields such as 'temporary_context', 'long_term_memory', 'ai_inferred_context', deduplication/quality scores, and MERGE/preserve the fact arrays from the structured input (refining or passing them through if appropriate).
+
+Ensure the output perfectly conforms to the required JSON schema.`;
 
 async function runGeminiEnhancement(contextId) {
   try {
@@ -597,8 +623,10 @@ async function runGeminiEnhancement(contextId) {
       }
     });
 
-    // 4. Call Google AI Studio Gemini API
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    // ==========================================
+    // PASS 1: Facts Extraction
+    // ==========================================
+    const pass1Response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -607,7 +635,91 @@ async function runGeminiEnhancement(contextId) {
       body: JSON.stringify({
         contents: [{ parts }],
         systemInstruction: {
-          parts: [{ text: SYSTEM_INSTRUCTIONS }]
+          parts: [{ text: SYSTEM_INSTRUCTIONS_PASS_1 }]
+        },
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              technical_stack: { type: "ARRAY", items: { type: "STRING" } },
+              errors_and_issues: { type: "ARRAY", items: { type: "STRING" } },
+              architecture_decisions: { type: "ARRAY", items: { type: "STRING" } },
+              pending_tasks: { type: "ARRAY", items: { type: "STRING" } },
+              important_code: { type: "ARRAY", items: { type: "STRING" } },
+              files_mentioned: { type: "ARRAY", items: { type: "STRING" } },
+              user_preferences: { type: "ARRAY", items: { type: "STRING" } },
+              constraints: { type: "ARRAY", items: { type: "STRING" } },
+              successful_solutions: { type: "ARRAY", items: { type: "STRING" } },
+              failed_attempts: { type: "ARRAY", items: { type: "STRING" } }
+            },
+            required: [
+              "technical_stack",
+              "errors_and_issues",
+              "architecture_decisions",
+              "pending_tasks",
+              "important_code",
+              "files_mentioned",
+              "user_preferences",
+              "constraints",
+              "successful_solutions",
+              "failed_attempts"
+            ]
+          }
+        }
+      })
+    });
+
+    if (!pass1Response.ok) {
+      const errText = await pass1Response.text();
+      throw new Error(`Gemini API Pass 1 Error: HTTP ${pass1Response.status} - ${errText}`);
+    }
+
+    const pass1Json = await pass1Response.json();
+    const pass1TextResult = pass1Json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!pass1TextResult) {
+      throw new Error('Empty response received from Gemini API in Pass 1');
+    }
+
+    const pass1ParsedResult = JSON.parse(pass1TextResult);
+
+    // ==========================================
+    // PASS 2: Synthesis and Packaging
+    // ==========================================
+    const pass2PromptText = `
+[RAW CONVERSATION TRANSCRIPT]
+${promptText}
+
+[EXTRACTED TECHNICAL FACTS FOR SYNTHESIS]
+${JSON.stringify(pass1ParsedResult, null, 2)}
+`;
+
+    // Reconstruct parts for Pass 2 (including images and synthesized facts)
+    const pass2Parts = [{ text: pass2PromptText }];
+    // Append the same inline images if present
+    seenImages.forEach(dataUrl => {
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        pass2Parts.push({
+          inlineData: {
+            mimeType: match[1],
+            data: match[2]
+          }
+        });
+      }
+    });
+
+    const pass2Response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
+      },
+      body: JSON.stringify({
+        contents: [{ parts: pass2Parts }],
+        systemInstruction: {
+          parts: [{ text: SYSTEM_INSTRUCTIONS_PASS_2 }]
         },
         generationConfig: {
           temperature: 0.2,
@@ -638,6 +750,7 @@ async function runGeminiEnhancement(contextId) {
               technical_stack: { type: "ARRAY", items: { type: "STRING" } },
               constraints: { type: "ARRAY", items: { type: "STRING" } },
               important_code: { type: "ARRAY", items: { type: "STRING" } },
+              files_mentioned: { type: "ARRAY", items: { type: "STRING" } },
               errors_and_issues: { type: "ARRAY", items: { type: "STRING" } },
               successful_solutions: { type: "ARRAY", items: { type: "STRING" } },
               failed_attempts: { type: "ARRAY", items: { type: "STRING" } },
@@ -679,6 +792,7 @@ async function runGeminiEnhancement(contextId) {
               "technical_stack",
               "constraints",
               "important_code",
+              "files_mentioned",
               "errors_and_issues",
               "successful_solutions",
               "failed_attempts",
@@ -696,18 +810,18 @@ async function runGeminiEnhancement(contextId) {
       })
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini API Error: HTTP ${response.status} - ${errText}`);
+    if (!pass2Response.ok) {
+      const errText = await pass2Response.text();
+      throw new Error(`Gemini API Pass 2 Error: HTTP ${pass2Response.status} - ${errText}`);
     }
 
-    const resJson = await response.json();
-    const textResult = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!textResult) {
-      throw new Error('Empty response received from Gemini API');
+    const pass2Json = await pass2Response.json();
+    const pass2TextResult = pass2Json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!pass2TextResult) {
+      throw new Error('Empty response received from Gemini API in Pass 2');
     }
 
-    const parsedResult = JSON.parse(textResult);
+    const parsedResult = JSON.parse(pass2TextResult);
 
     // 5. Save updated context back to storage
     const latest = await chrome.storage.local.get('contexts');
@@ -739,6 +853,7 @@ async function runGeminiEnhancement(contextId) {
         technical_stack: parsedResult.technical_stack,
         constraints: parsedResult.constraints,
         important_code: parsedResult.important_code,
+        files_mentioned: parsedResult.files_mentioned || [],
         errors_and_issues: parsedResult.errors_and_issues,
         successful_solutions: parsedResult.successful_solutions,
         failed_attempts: parsedResult.failed_attempts,

@@ -288,7 +288,12 @@ If a user configures a Gemini API key in the extension settings, Cross Context c
                                  │
                                  ▼
                   ┌──────────────────────────────┐
-                  │  Gemini API Schema Payload   │
+                  │  Pass 1: Focused Facts API   │
+                  └──────────────┬───────────────┘
+                                 │
+                                 ▼
+                  ┌──────────────────────────────┐
+                  │  Pass 2: Synthesis API Call  │
                   └──────────────┬───────────────┘
                                  │
                                  ▼
@@ -298,10 +303,22 @@ If a user configures a Gemini API key in the extension settings, Cross Context c
                   └──────────────────────────────┘
 ```
 
-1. **Preprocessing**: The background script compresses the transcript, stripping conversational greetings from old turns and truncating code blocks older than 8 turns to save tokens.
-2. **System Instruction Guardrails**: The background script calls the Gemini API with structured instructions, directing it to build a concise JSON summary containing architectural decisions, current tasks, error listings, and preferences.
-3. **Structured Response Schema**: Using Gemini's JSON schema constraints, the model produces a standardized payload, ensuring the output matches the expected properties.
-4. **Adaptive Prompt Formatting**: Based on the conversation type (e.g., Coding, Debugging, Brainstorming), the extension selects a custom prompt template, generating a highly tailored handoff message.
+To eliminate semantic drift and ensure high accuracy under complex schema properties, the distillation flow utilizes a **Two-Pass Sequential Pipeline**:
+
+1. **Preprocessing**: The background script compresses the transcript, stripping conversational greetings from old turns and truncating older code blocks to optimize the token payload.
+2. **Pass 1 — Technical Facts Extraction**: A focused, compact JSON schema is dispatched to the Gemini API along with raw chat content. The model extracts objective details with high precision, including:
+   - `technical_stack` (languages, frameworks, DBs)
+   - `errors_and_issues` (unresolved errors, traceback dumps)
+   - `architecture_decisions` (architectural patterns, design choices)
+   - `pending_tasks` (checklist items, active goals)
+   - `important_code` (active syntax snippets and configurations)
+   - `files_mentioned` (impacted files/directory structure)
+   - `user_preferences` (expressed preferences, coding guidelines)
+3. **Pass 2 — Grounded Context Synthesis**: The raw transcript is combined with the high-fidelity structured facts extracted in Pass 1 as a single input prompt. This second Gemini call synthesizes the high-level properties, generating:
+   - A concise context `title` (max 6-8 words)
+   - A grounded `project_summary` and `current_task`
+   - An optimized `handoffPrompt` constructed in the **first-person user voice** (e.g., *"I was working on X. Here is the state... please continue by..."*), avoiding robotic third-person meta-context.
+4. **Structured Integration**: The service worker merges synthesized properties and extracted facts into a unified schema payload. This maintains 100% backward-compatibility with downstream UI components, memory graph models, and tab injectors.
 
 ---
 

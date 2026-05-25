@@ -817,23 +817,18 @@ function renderPreviewContent(ctx) {
         <div class="ai-preview-pending">
           <div class="ai-preview-pending-glow"></div>
           <div class="ai-preview-pending-content">
-            <div class="premium-large-spinner">
-              <svg class="cc-spinner-orbit" viewBox="0 0 50 50" width="48" height="48">
-                <circle class="orbit-outer" cx="25" cy="25" r="20" fill="none" stroke="rgba(167, 139, 250, 0.12)" stroke-width="3"></circle>
-                <circle class="orbit-outer-path" cx="25" cy="25" r="20" fill="none" stroke="url(#orbit-grad-1)" stroke-width="3" stroke-linecap="round"></circle>
-                <circle class="orbit-inner" cx="25" cy="25" r="12" fill="none" stroke="rgba(219, 39, 119, 0.08)" stroke-width="2.5"></circle>
-                <circle class="orbit-inner-path" cx="25" cy="25" r="12" fill="none" stroke="url(#orbit-grad-2)" stroke-width="2.5" stroke-linecap="round"></circle>
-                <defs>
-                  <linearGradient id="orbit-grad-1" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#7c3aed" />
-                    <stop offset="100%" stop-color="#3b82f6" />
-                  </linearGradient>
-                  <linearGradient id="orbit-grad-2" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#db2777" />
-                    <stop offset="100%" stop-color="#7c3aed" />
-                  </linearGradient>
-                </defs>
-              </svg>
+            <div class="loader-wrapper">
+              <span class="loader-letter">G</span>
+              <span class="loader-letter">e</span>
+              <span class="loader-letter">n</span>
+              <span class="loader-letter">e</span>
+              <span class="loader-letter">r</span>
+              <span class="loader-letter">a</span>
+              <span class="loader-letter">t</span>
+              <span class="loader-letter">i</span>
+              <span class="loader-letter">n</span>
+              <span class="loader-letter">g</span>
+              <div class="loader"></div>
             </div>
             
             <div class="ai-pending-title">Distillation Engine Active</div>
