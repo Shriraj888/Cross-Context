@@ -235,12 +235,12 @@ graph TD
     classDef issue fill:#7f1d1d,stroke:#ef4444,stroke-width:1px,color:#fff;
     classDef dec fill:#701a75,stroke:#d946ef,stroke-width:1px,color:#fff;
 
-    Root[project_root: PROJECT]:::root
+    Root["project_root: PROJECT"]:::root
     
     %% Semantic Cluster 1 (Turn 1: Setup React & RTK)
-    TechReact[tech_react: TECH_STACK<br>React]:::tech
-    TechRedux[tech_redux: TECH_STACK<br>Redux]:::tech
-    DecRTK[dec_rtk: DECISION<br>Use Redux Toolkit]:::dec
+    TechReact["tech_react: TECH_STACK - React"]:::tech
+    TechRedux["tech_redux: TECH_STACK - Redux"]:::tech
+    DecRTK["dec_rtk: DECISION - Use Redux Toolkit"]:::dec
     
     Root -->|IMPLEMENTED_WITH| TechReact
     Root -->|IMPLEMENTED_WITH| TechRedux
@@ -252,8 +252,8 @@ graph TD
     TechReact <-->|RELATED_TO| TechRedux
     
     %% Semantic Cluster 2 (Turn 2: State mismatch issue in store.js)
-    IssueMismatch[issue_mismatch: ISSUE<br>TypeError at store.js:24]:::issue
-    TaskFixMismatch[task_fix: TASK<br>Fix state mismatch]:::task
+    IssueMismatch["issue_mismatch: ISSUE - TypeError at store.js:24"]:::issue
+    TaskFixMismatch["task_fix: TASK - Fix state mismatch"]:::task
     
     Root -->|BLOCKED_BY| IssueMismatch
     Root -->|DEPENDS_ON| TaskFixMismatch
@@ -266,7 +266,7 @@ graph TD
     TaskFixMismatch -.->|RELATED_TO| TechRedux
     
     %% BFS Traversal Visualization
-    subgraph 2-Hop BFS Subgraph (Focus: TypeError)
+    subgraph "2-Hop BFS Subgraph (Focus: TypeError)"
         IssueMismatch
         TaskFixMismatch
         TechRedux
