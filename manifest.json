@@ -3,7 +3,7 @@
   "name": "Cross Context",
   "version": "1.0.0",
   "description": "Share conversation context between LLMs — Claude, ChatGPT, Gemini, Grok, Perplexity. Never start from scratch again.",
-  "author": "Cross Context",
+  "author": "Shriraj888",
 
   "icons": {
     "16":  "icons/icon16.png",

@@ -176,11 +176,11 @@ export class ContextIntelligenceEngine {
 
       // Track Execution Context Topics & Solved problems deterministically
       if (content.toLowerCase().includes('solved') || content.toLowerCase().includes('fixed') || content.toLowerCase().includes('working now')) {
-        const sentenceMatch = content.match(/[^.!?]*?(?:solved|fixed)[^.!?]*/i);
+        const sentenceMatch = content.match(/[^.!?]*?(?:solved|fixed|working now)[^.!?]*/i);
         if (sentenceMatch) this.executionContext.solvedProblems.add(sentenceMatch[0].trim());
       }
       if (content.toLowerCase().includes('avoid') || content.toLowerCase().includes('failed') || content.toLowerCase().includes('do not repeat')) {
-        const sentenceMatch = content.match(/[^.!?]*?(?:avoid|failed)[^.!?]*/i);
+        const sentenceMatch = content.match(/[^.!?]*?(?:avoid|failed|do not repeat)[^.!?]*/i);
         if (sentenceMatch) this.executionContext.failedApproaches.add(sentenceMatch[0].trim());
       }
 
@@ -195,10 +195,16 @@ export class ContextIntelligenceEngine {
 
       // Deterministic Node & Relationship extraction
       // A. Extract Tech Stack
-      const techKeywords = ['react', 'next.js', 'node', 'vue', 'chrome extension', 'javascript', 'typescript', 'rust', 'actix-web', 'sqlx', 'css', 'vanilla css', 'flexbox', 'html', 'gemini', 'gemini api', 'tailwind'];
+      const techKeywords = [
+        'react', 'next.js', 'node', 'vue', 'chrome extension', 'javascript', 'typescript', 'rust', 'actix-web', 'sqlx', 
+        'css', 'vanilla css', 'flexbox', 'html', 'gemini', 'gemini api', 'tailwind', 'tailwindcss', 'python', 'django', 
+        'flask', 'fastapi', 'express', 'mongodb', 'postgresql', 'sqlite', 'mysql', 'docker', 'kubernetes', 'aws', 
+        'firebase', 'supabase', 'git', 'github', 'svelte', 'angular'
+      ];
       techKeywords.forEach(tech => {
-        if (content.toLowerCase().includes(tech)) {
-          const techId = `tech_${tech.replace(/\s+/g, '_')}`;
+        const regex = new RegExp(`\\b${tech.replace('.', '\\.')}\\b`, 'i');
+        if (regex.test(content)) {
+          const techId = `tech_${tech.replace(/\s+/g, '_').replace('.', '_')}`;
           this.addNode(techId, 'TECH_STACK', tech.toUpperCase(), { name: tech });
           this.addEdge(techId, 'project_root', 'IMPLEMENTED_WITH');
           this.executionContext.topicsDiscussed.add(tech);
@@ -206,28 +212,52 @@ export class ContextIntelligenceEngine {
       });
 
       // B. Extract Tasks / Objectives
-      if (content.toLowerCase().includes('todo') || content.toLowerCase().includes('task') || content.toLowerCase().includes('objective')) {
-        const sentences = content.split(/[.!?\n]/);
-        sentences.forEach((s, idx) => {
-          if (s.toLowerCase().includes('todo') || s.toLowerCase().includes('task') || s.toLowerCase().includes('objective')) {
-            const taskId = `${msgId}_task_${idx}`;
-            const cleanLabel = s.replace(/[-*•]/g, '').trim();
-            if (cleanLabel.length > 10) {
-              this.addNode(taskId, 'TASK', cleanLabel, { status: 'active' });
-              this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
-            }
+      const lines = content.split('\n');
+      lines.forEach((line, idx) => {
+        const trimmed = line.trim();
+        const taskId = `${msgId}_task_${idx}`;
+        if (trimmed.startsWith('- [ ]') || trimmed.startsWith('- [x]')) {
+          const cleanLabel = trimmed.replace(/^-\s*\[[ x]\]\s*/i, '').trim();
+          if (cleanLabel.length > 5) {
+            const isCompleted = trimmed.includes('[x]');
+            this.addNode(taskId, 'TASK', cleanLabel, { status: isCompleted ? 'completed' : 'active' });
+            this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
           }
-        });
+        } else if (trimmed.toLowerCase().startsWith('todo:') || trimmed.toLowerCase().startsWith('task:')) {
+          const cleanLabel = trimmed.replace(/^(todo|task):\s*/i, '').trim();
+          if (cleanLabel.length > 5) {
+            this.addNode(taskId, 'TASK', cleanLabel, { status: 'active' });
+            this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
+          }
+        }
+      });
+
+      // Fallback sentence-based task extraction if no lists found
+      if (!content.includes('- [ ]') && !content.includes('- [x]')) {
+        if (content.toLowerCase().includes('todo') || content.toLowerCase().includes('task') || content.toLowerCase().includes('objective')) {
+          const sentences = content.split(/[.!?\n]/);
+          sentences.forEach((s, idx) => {
+            if (s.toLowerCase().includes('todo') || s.toLowerCase().includes('task') || s.toLowerCase().includes('objective')) {
+              const taskId = `${msgId}_task_fallback_${idx}`;
+              const cleanLabel = s.replace(/[-*•]/g, '').trim();
+              if (cleanLabel.length > 12) {
+                this.addNode(taskId, 'TASK', cleanLabel, { status: 'active' });
+                this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
+              }
+            }
+          });
+        }
       }
 
       // C. Extract Decisions
-      if (content.toLowerCase().includes('decided') || content.toLowerCase().includes('let\'s use') || content.toLowerCase().includes('we will use')) {
+      if (content.toLowerCase().includes('decided') || content.toLowerCase().includes('let\'s use') || content.toLowerCase().includes('we will use') || content.toLowerCase().includes('decided to')) {
         const sentences = content.split(/[.!?\n]/);
         sentences.forEach((s, idx) => {
-          if (s.toLowerCase().includes('decided') || s.toLowerCase().includes('use')) {
+          const lower = s.toLowerCase();
+          if (lower.includes('decided') || lower.includes('we will use') || lower.includes('let\'s use') || lower.includes('resolved to')) {
             const decId = `${msgId}_dec_${idx}`;
             const cleanLabel = s.replace(/[-*•]/g, '').trim();
-            if (cleanLabel.length > 10) {
+            if (cleanLabel.length > 12) {
               this.addNode(decId, 'DECISION', cleanLabel);
               this.addEdge(decId, 'project_root', 'RELATED_TO');
             }
@@ -236,13 +266,14 @@ export class ContextIntelligenceEngine {
       }
 
       // D. Extract Issues / Errors
-      if (content.toLowerCase().includes('error') || content.toLowerCase().includes('bug') || content.toLowerCase().includes('fail')) {
+      if (content.toLowerCase().includes('error') || content.toLowerCase().includes('bug') || content.toLowerCase().includes('fail') || content.toLowerCase().includes('fails with') || content.toLowerCase().includes('fails on')) {
         const sentences = content.split(/[.!?\n]/);
         sentences.forEach((s, idx) => {
-          if (s.toLowerCase().includes('error') || s.toLowerCase().includes('bug') || s.toLowerCase().includes('fail')) {
+          const lower = s.toLowerCase();
+          if (lower.includes('error') || lower.includes('bug') || lower.includes('fail') || lower.includes('crash') || lower.includes('exception')) {
             const issueId = `${msgId}_issue_${idx}`;
             const cleanLabel = s.replace(/[-*•]/g, '').trim();
-            if (cleanLabel.length > 10) {
+            if (cleanLabel.length > 12) {
               this.addNode(issueId, 'ISSUE', cleanLabel);
               this.addEdge(issueId, 'project_root', 'BLOCKED_BY');
             }
@@ -277,6 +308,21 @@ export class ContextIntelligenceEngine {
 }
 
 export function formatContextPrompt(context, targetPlatform) {
+  // Inner function generates the raw prompt, then we apply truncation tracking
+  const rawPrompt = _buildPrompt(context, targetPlatform);
+
+  // Truncation tracking: if the prompt exceeds CHAR_LIMIT, truncate and flag the context
+  if (rawPrompt.length > CHAR_LIMIT) {
+    context.truncated = true;
+    context.truncatedAt = CHAR_LIMIT;
+    return rawPrompt.substring(0, CHAR_LIMIT) + '\n\n⚠️ [Cross Context: Conversation was truncated at ~' + Math.round(CHAR_LIMIT / 4) + ' tokens to fit transfer limits. Some earlier context may be missing.]';
+  }
+
+  context.truncated = false;
+  return rawPrompt;
+}
+
+function _buildPrompt(context, targetPlatform) {
   if (context.aiEnhanced && context.aiStatus === 'success') {
     const src = getPlatformDisplayName(context.platform);
     const e = context.aiEnhanced;
@@ -317,185 +363,168 @@ export function formatContextPrompt(context, targetPlatform) {
     const divider = '═'.repeat(60);
 
     if (dominantIntent === 'coding') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Coding]
-You are continuing a software development and implementation session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+      return `[🔄 AI-Enhanced Cross Context Transfer — Coding Briefing]
+I was working on a coding project with ${src}. Here is where we left off:
 
-📋 Project Summary:
-${summary}
-
-🎯 Current Coding Objective:
-- Objective: ${task}
-- Specific Intent: ${intent}
-
-💻 Tech Stack & Active Files:
-- Stack: ${tech}
+📁 What I was building:
+- Project Summary: ${summary}
+- Tech Stack: ${tech}
 - Target Files: ${files}
 
-📁 Key Code & Configurations:
+🛠️ Key Code & Configurations:
 ${codeBlocksJoin(e.important_code)}
 
-🔑 Architecture Decisions:
+🔑 Key decisions made so far:
 ${decisions}
 
 ⚠️ Constraints & Limits:
 ${constraints}
 
-📋 Pending Actions:
+🎯 What I was working toward:
+- Objective: ${task}
+- Specific Intent: ${intent}
+
+📋 Tasks I was working on:
 ${pending}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
     }
 
     if (dominantIntent === 'debugging') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Debugging]
-You are continuing a critical software debugging session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+      return `[🔄 AI-Enhanced Cross Context Transfer — Debugging Briefing]
+I was working on debugging an issue with ${src}. Here is where we left off:
 
-📋 Project Summary:
-${summary}
-
-🎯 Core Debugging Target:
-- Objective: ${task}
-- Intent: ${intent}
-
-❌ Tracked Errors & Issues:
-${bulletJoin(e.errors_and_issues)}
-
-💡 Attempted Solves & Approaches:
-${bulletJoin(e.failed_attempts)}
-
-✅ Successful Solutions:
-${bulletJoin(e.successful_solutions)}
-
-💻 Tech Stack & Active Files:
-- Stack: ${tech}
+📁 What I was building & testing:
+- Project Summary: ${summary}
+- Tech Stack: ${tech}
 - Target Files: ${files}
 
-📁 Error-Prone Code Snippets:
+🛠️ Error-Prone Code Snippets:
 ${codeBlocksJoin(e.important_code)}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+❌ What I was stuck on:
+- Core Debugging Target: ${task}
+- Intent: ${intent}
+- Tracked Errors & Issues:
+${bulletJoin(e.errors_and_issues)}
+
+💡 Attempted Solves & Solutions:
+- Failed Attempts:
+${bulletJoin(e.failed_attempts)}
+- Successful Solutions:
+${bulletJoin(e.successful_solutions)}
+
+🚀 Please continue from:
 ${handoff}`;
     }
 
     if (dominantIntent === 'brainstorming') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Brainstorming & Planning]
-You are continuing a brainstorming, ideation, or product planning session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+      return `[🔄 AI-Enhanced Cross Context Transfer — Brainstorming Briefing]
+I was brainstorming and planning with ${src}. Here is where we left off:
 
-📋 Core Topic/Overview:
-${summary}
+📁 What I was building/planning:
+- Core Topic/Overview: ${summary}
+- Referenced Files: ${files || 'None recorded'}
 
-🎯 Brainstorming Goal:
-- Target Objective: ${task}
-- Intent/Vision: ${intent}
-
-💡 Deduplicated Key Concepts (Phase 2):
+💡 Key concepts & ideas developed:
 ${bulletJoin(e.deduplicated_context)}
 
-💭 Long Term Project Memory:
+🧠 Long term project memory:
 ${bulletJoin(e.long_term_memory)}
 
-🔑 Key Choices & Decisions:
+🔑 Key decisions made so far:
 ${decisions}
 
 ⚠️ Constraints & Limits:
 ${constraints}
 
-📋 Next Planning Actions:
+🎯 What I was working toward:
+- Target Objective: ${task}
+- Intent/Vision: ${intent}
+
+📋 Tasks I was working on:
 ${pending}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
     }
 
     if (dominantIntent === 'research') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Research & Studying]
-You are continuing a conceptual research or academic study session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+      return `[🔄 AI-Enhanced Cross Context Transfer — Research Briefing]
+I was researching and studying with ${src}. Here is where we left off:
 
-📋 Research Focus:
-${summary}
+📁 What I was researching:
+- Research Focus: ${summary}
+- Referenced Files & Sources: ${files || 'None recorded'}
 
-🎯 Study Target:
+💡 Core concepts discovered:
+${bulletJoin(e.deduplicated_context)}
+
+🧠 Long term project memory:
+${bulletJoin(e.long_term_memory)}
+
+🤖 AI-inferred insights:
+${bulletJoin(e.ai_inferred_context)}
+
+⚙️ My preferences:
+${bulletJoin(e.user_preferences)}
+
+🎯 What I was working toward:
 - Focus Area: ${task}
 - Knowledge Goal: ${intent}
 
-💡 Deduplicated Core Concepts:
-${bulletJoin(e.deduplicated_context)}
-
-💭 Long Term Project Memory:
-${bulletJoin(e.long_term_memory)}
-
-🤖 AI Inferred Intelligence Layer:
-${bulletJoin(e.ai_inferred_context)}
-
-⚙️ Developer/User Preferences:
-${bulletJoin(e.user_preferences)}
-
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
     }
 
     if (dominantIntent === 'writing') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Composition & Writing]
-You are continuing a text composition or writing session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+      return `[🔄 AI-Enhanced Cross Context Transfer — Writing Briefing]
+I was drafting and composing text with ${src}. Here is where we left off:
 
-📋 Narrative/Content Overview:
-${summary}
+📁 What I was writing:
+- Narrative/Content Overview: ${summary}
+- Referenced Documents: ${files || 'None recorded'}
 
-🎯 Writing Objective:
+💡 Synthesized ideas & guidelines:
+${bulletJoin(e.deduplicated_context)}
+
+⚙️ My style preferences:
+${bulletJoin(e.user_preferences)}
+
+🎯 What I was working toward:
 - Current Target: ${task}
 - Creative Intent: ${intent}
 
-⚙️ Style Guidelines & Preferences:
-${bulletJoin(e.user_preferences)}
-
-💡 Synthesized Ideas & Contexts:
-${bulletJoin(e.deduplicated_context)}
-
-📋 Next Composition Steps:
+📋 Next composition steps:
 ${pending}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
     }
 
     // General fallback
-    return `[🔄 AI-Enhanced Cross Context Transfer]
-You are continuing a conversation that was started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+    return `[🔄 AI-Enhanced Cross Context Transfer — Briefing]
+I was working on a project with ${src}. Here is where we left off:
 
-📋 Project Summary:
-${summary}
+📁 What I was building:
+- Project Summary: ${summary}
+- Tech Stack & Active Files: Stack: ${tech} | Files: ${files}
 
-🎯 Current Task & Intent:
-- Task: ${task}
-- Intent: ${intent}
-
-💻 Tech Stack & Active Files:
-- Stack: ${tech}
-- Files: ${files}
-
-🔑 Architecture Decisions:
+🔑 Key decisions made so far:
 ${decisions}
 
 ⚠️ Constraints & Limits:
 ${constraints}
 
-📋 Pending Tasks:
+🎯 What I was working toward:
+- Task: ${task}
+- Intent: ${intent}
+
+📋 Tasks I was working on:
 ${pending}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
   }
 
@@ -513,51 +542,39 @@ ${handoff}`;
   const handoffHint = firstUser ? firstUser.content : 'Continue active working session';
   const handoffTruncated = handoffHint.length > 300 ? handoffHint.substring(0, 300) + '...' : handoffHint;
 
-  return `[🔄 Cross Context Transfer — State Restoration Continuity Protocol]
-You are continuing a software engineering and collaborative session started on ${sourceName}.
-The active conversation context has been compiled into a structured Memory Graph by our Context Intelligence Engine to enable seamless continuation and absolute technical continuity.
+  return `[🔄 Cross Context Transfer — State Restoration Briefing]
+I was working on a project with ${sourceName}. Here is where we left off:
 
-⚠️ COLLABORATOR CONTINUITY INSTRUCTIONS:
-1. CONTINUE INSTANTLY from the current state outlined below.
-2. DO NOT restart context, summarize the project, or re-explain topics.
-3. DO NOT re-introduce yourself or write conversational filler. Act as an active, ongoing pair-programmer/collaborator.
-4. Verify the active checklist and focus area and align immediately.
-
-════════════════════════════════════════════════════════════
-📋 DETERMINISTIC STATE RESTORATION PACKET
-════════════════════════════════════════════════════════════
-
-⚙️ SYSTEM CONTEXT:
-${packet.system_context}
-
-🧠 DISTILLED PRIORITY SPECIFICATIONS:
-${packet.priority_memory.map(m => `• ${m}`).join('\n') || 'None recorded'}
-
-🎯 ACTIVE TASKS Checklist:
-${packet.active_tasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
-
-❌ UNRESOLVED BLOCKERS & ISSUES:
-${packet.unresolved_issues.map(i => `• ${i}`).join('\n') || 'None active'}
-
-🔑 ARCHITECTURE & TECHNICAL DECISIONS:
-${packet.important_decisions.map(d => `• ${d}`).join('\n') || 'None recorded'}
-
-🔄 ACTIVE EXECUTION CONTEXT:
-- Current Focus Area: ${packet.execution_context.current_focus}
-- Core Topics Discussed: ${packet.execution_context.topics_discussed.join(', ') || 'None'}
-- Solved Problems & Closed Issues:
+⚙️ What I was building:
+- System Context: ${packet.system_context}
+- Active Execution Context:
+  - Current Focus Area: ${packet.execution_context.current_focus}
+  - Core Topics Discussed: ${packet.execution_context.topics_discussed.join(', ') || 'None'}
+  - Solved Problems & Closed Issues:
 ${packet.execution_context.problems_solved.map(p => `  ✓ ${p}`).join('\n') || '  None'}
-- Failed Approaches to Avoid:
+  - Failed Approaches to Avoid:
 ${packet.execution_context.approaches_to_avoid.map(a => `  ⚠️ ${a}`).join('\n') || '  None'}
 
-⚙️ DEVELOPER PREFERENCES:
+🧠 Distilled priority specifications:
+${packet.priority_memory.map(m => `• ${m}`).join('\n') || 'None recorded'}
+
+🔑 Key decisions made so far:
+${packet.important_decisions.map(d => `• ${d}`).join('\n') || 'None recorded'}
+
+❌ What I was stuck on (Unresolved Issues):
+${packet.unresolved_issues.map(i => `• ${i}`).join('\n') || 'None active'}
+
+⚙️ My preferences:
 ${packet.user_preferences.map(p => `• ${p}`).join('\n') || 'None configured'}
 
-════════════════════════════════════════════════════════════
-🚀 CONTINUATION FOCUS & HANDOFF:
+🎯 Tasks I was working on:
+${packet.active_tasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
+
+🚀 Please continue from:
 ${handoffTruncated}
-════════════════════════════════════════════════════════════
-Please confirm receipt of this context state. Acknowledge what tasks you are taking over, and ask the user what to focus on next to continue seamlessly.`;
+
+---
+Please acknowledge these details. Tell me what tasks you are taking over, and ask me what we should focus on next to continue seamlessly.`;
 }
 
 /**

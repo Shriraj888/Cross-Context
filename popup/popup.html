@@ -135,13 +135,27 @@
         </button>
       </div>
       
-      <!-- Tab Navigation (shown only for AI-Enhanced contexts) -->
+      <!-- Tab Navigation -->
       <div id="preview-tabs" class="preview-tabs hidden">
         <button id="tab-ai-summary" class="tab-btn active">
           <svg class="tab-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
           </svg>
           <span>AI Summary</span>
+        </button>
+        <button id="tab-memory-graph" class="tab-btn">
+          <svg class="tab-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <circle cx="6" cy="6" r="3"></circle>
+            <circle cx="18" cy="6" r="3"></circle>
+            <circle cx="18" cy="18" r="3"></circle>
+            <circle cx="6" cy="18" r="3"></circle>
+            <line x1="6" y1="9" x2="10.5" y2="10.5"></line>
+            <line x1="18" y1="9" x2="13.5" y2="10.5"></line>
+            <line x1="18" y1="15" x2="13.5" y2="13.5"></line>
+            <line x1="6" y1="15" x2="10.5" y2="13.5"></line>
+          </svg>
+          <span>Memory Graph</span>
         </button>
         <button id="tab-raw-transcript" class="tab-btn">
           <svg class="tab-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -155,7 +169,11 @@
         <!-- AI Summary view goes here dynamically -->
       </div>
       
-      <div id="preview-content" class="preview-content"></div>
+      <div id="preview-content-graph" class="preview-content-graph hidden">
+        <!-- Memory Graph view goes here dynamically -->
+      </div>
+      
+      <div id="preview-content" class="preview-content hidden"></div>
     </div>
   </div>
 
@@ -247,7 +265,7 @@
     </div>
   </div>
 
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 
 </html>

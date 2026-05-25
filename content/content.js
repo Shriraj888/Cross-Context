@@ -1366,7 +1366,51 @@
         }
       }
 
-      // ── Strategy 4: Alternating container fallback ──
+      // ── Strategy 4: Walk [role="main"] children by DOM order ──
+      const mainContainer = document.querySelector('[role="main"], main');
+      if (mainContainer) {
+        const msgs = [];
+        let lastRole = null;
+        for (const child of mainContainer.children) {
+          if (!filterInputArea(child)) continue;
+
+          // Try to classify via semantic role or tag name
+          const tag = child.tagName?.toLowerCase();
+          const isUserEl = tag === 'user-query' || child.querySelector('user-query') ||
+                           child.matches('[class*="user-query"], [class*="UserQuery"]') ||
+                           child.querySelector('[class*="user-query"], [class*="UserQuery"]');
+          const isModelEl = tag === 'model-response' || child.querySelector('model-response') ||
+                            child.matches('[class*="model-response"], [class*="ModelResponse"]') ||
+                            child.querySelector('[class*="model-response"], [class*="ModelResponse"]');
+
+          let role = null;
+          if (isUserEl && !isModelEl) role = 'user';
+          else if (isModelEl && !isUserEl) role = 'assistant';
+          else {
+            const semRole = classifyRoleSemantically(child);
+            if (semRole) role = semRole;
+            else {
+              const text = getInnerText(child);
+              if (text.length > 15) {
+                role = lastRole === 'user' ? 'assistant' : 'user';
+              }
+            }
+          }
+
+          if (role) {
+            const text = extractContent(child, role);
+            if (text.length > 10) {
+              msgs.push({ role, content: text, element: child });
+              lastRole = role;
+            }
+          }
+        }
+        if (hasBothRoles(msgs)) {
+          return { messages: deduplicate(msgs), title: gemTitle() };
+        }
+      }
+
+      // ── Strategy 5: Alternating container fallback ──
       return {
         messages: deduplicate(universalFallback('chat-window > div, [class*="conversation"] > div', 15)),
         title: gemTitle()
@@ -1559,6 +1603,205 @@
     return null;
   }
 
+  /**
+   * Preview-before-send: Shows a floating confirmation overlay with a truncated
+   * preview of the injected prompt. Returns a Promise that resolves to true (send)
+   * or false (cancel). Uses Shadow DOM for CSS isolation.
+   */
+  function showPreviewConfirmation(prompt) {
+    return new Promise((resolve) => {
+      // Remove any existing preview overlay
+      const existingHost = document.getElementById('__cc-preview-host');
+      if (existingHost) existingHost.remove();
+
+      const host = document.createElement('div');
+      host.id = '__cc-preview-host';
+      host.style.cssText = `
+        all: initial !important;
+        position: fixed !important;
+        bottom: 16px !important;
+        right: 16px !important;
+        z-index: 2147483647 !important;
+        pointer-events: auto !important;
+        display: block !important;
+      `;
+      document.documentElement.appendChild(host);
+      const shadow = host.attachShadow({ mode: 'open' });
+
+      const previewText = prompt.length > 400
+        ? prompt.substring(0, 400) + '…'
+        : prompt;
+
+      shadow.innerHTML = `
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+          .cc-preview-card {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, rgba(15, 18, 25, 0.97) 0%, rgba(8, 10, 14, 0.98) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 16px;
+            width: 380px;
+            max-width: calc(100vw - 32px);
+            color: #e4e4e7;
+            box-shadow:
+              0 20px 50px rgba(0, 0, 0, 0.5),
+              0 0 0 1px rgba(255, 255, 255, 0.04),
+              inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(24px);
+            animation: cc-preview-slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            box-sizing: border-box;
+          }
+
+          @keyframes cc-preview-slide-in {
+            from { transform: translateY(20px) scale(0.95); opacity: 0; }
+            to { transform: translateY(0) scale(1); opacity: 1; }
+          }
+
+          .cc-preview-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+          }
+
+          .cc-preview-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+          }
+
+          .cc-preview-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #ffffff;
+            letter-spacing: -0.2px;
+          }
+
+          .cc-preview-subtitle {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.45);
+            font-weight: 400;
+          }
+
+          .cc-preview-body {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            padding: 10px 12px;
+            max-height: 160px;
+            overflow-y: auto;
+            font-size: 11.5px;
+            line-height: 1.55;
+            color: rgba(255, 255, 255, 0.7);
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-bottom: 12px;
+          }
+
+          .cc-preview-body::-webkit-scrollbar {
+            width: 4px;
+          }
+          .cc-preview-body::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+          }
+
+          .cc-preview-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+          }
+
+          .cc-preview-btn {
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 7px 18px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            letter-spacing: 0.2px;
+          }
+
+          .cc-preview-btn.cancel {
+            background: rgba(255, 255, 255, 0.06);
+            color: rgba(255, 255, 255, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+          }
+          .cc-preview-btn.cancel:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+          }
+
+          .cc-preview-btn.send {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: #ffffff;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+          }
+          .cc-preview-btn.send:hover {
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.45);
+            transform: translateY(-1px);
+          }
+        </style>
+
+        <div class="cc-preview-card">
+          <div class="cc-preview-header">
+            <div class="cc-preview-icon">🔄</div>
+            <div>
+              <div class="cc-preview-title">Cross Context Transfer Ready</div>
+              <div class="cc-preview-subtitle">Review prompt before sending</div>
+            </div>
+          </div>
+          <div class="cc-preview-body">${previewText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          <div class="cc-preview-actions">
+            <button class="cc-preview-btn cancel" id="cc-preview-cancel">Cancel</button>
+            <button class="cc-preview-btn send" id="cc-preview-send">Send ↵</button>
+          </div>
+        </div>
+      `;
+
+      const cleanup = (result) => {
+        host.remove();
+        resolve(result);
+      };
+
+      shadow.getElementById('cc-preview-send').addEventListener('click', () => cleanup(true));
+      shadow.getElementById('cc-preview-cancel').addEventListener('click', () => cleanup(false));
+
+      // Keyboard: Enter to send, Escape to cancel
+      const keyHandler = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); cleanup(true); }
+        if (e.key === 'Escape') { e.preventDefault(); cleanup(false); }
+      };
+      document.addEventListener('keydown', keyHandler, { once: false });
+
+      // Clean up keyboard listener when resolved
+      const origCleanup = cleanup;
+      const wrappedCleanup = (result) => {
+        document.removeEventListener('keydown', keyHandler);
+        origCleanup(result);
+      };
+      shadow.getElementById('cc-preview-send').addEventListener('click', () => wrappedCleanup(true));
+      shadow.getElementById('cc-preview-cancel').addEventListener('click', () => wrappedCleanup(false));
+
+      // Auto-timeout after 60 seconds (auto-send)
+      setTimeout(() => {
+        if (document.getElementById('__cc-preview-host')) {
+          wrappedCleanup(true);
+        }
+      }, 60000);
+    });
+  }
+
   const INJECTORS = {
 
     async claude(prompt) {
@@ -1567,7 +1810,9 @@
       );
       if (!el) return { success: false, error: 'Claude input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1500);
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
+      await sleep(300);
       trySubmit(el, 'button[aria-label*="Send"], button[data-testid*="send"], button[aria-label="Send Message"], button[class*="send"]');
       return { success: true };
     },
@@ -1578,7 +1823,9 @@
       );
       if (!el) return { success: false, error: 'ChatGPT input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1500);
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
+      await sleep(300);
       trySubmit(el, '[data-testid="send-button"], button[aria-label="Send message"], button[aria-label="Send prompt"], button[data-testid*="send"], button[class*="send"]');
       return { success: true };
     },
@@ -1589,7 +1836,9 @@
       );
       if (!el) return { success: false, error: 'Gemini input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1500);
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
+      await sleep(300);
       trySubmit(el, 'button.send-button, button[aria-label*="Send"], button[mattooltip*="Send"], button[class*="send"]');
       return { success: true };
     },
@@ -1600,7 +1849,9 @@
       );
       if (!el) return { success: false, error: 'Grok input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1500);
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
+      await sleep(300);
       trySubmit(el, 'button[aria-label*="Send"], button[type="submit"], button[data-testid*="send"], button[class*="send"]');
       return { success: true };
     },
@@ -1611,7 +1862,9 @@
       );
       if (!el) return { success: false, error: 'Perplexity input not found' };
       insertTextProgrammatically(el, prompt);
-      await sleep(1500);
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
+      await sleep(300);
       trySubmit(el, 'button[aria-label*="Submit"], button[type="submit"], button[class*="send"]');
       return { success: true };
     },
@@ -2056,185 +2309,168 @@
       const divider = '═'.repeat(60);
 
       if (dominantIntent === 'coding') {
-        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Coding]
-You are continuing a software development and implementation session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+        return `[🔄 AI-Enhanced Cross Context Transfer — Coding Briefing]
+I was working on a coding project with ${src}. Here is where we left off:
 
-📋 Project Summary:
-${summary}
-
-🎯 Current Coding Objective:
-- Objective: ${task}
-- Specific Intent: ${intent}
-
-💻 Tech Stack & Active Files:
-- Stack: ${tech}
+📁 What I was building:
+- Project Summary: ${summary}
+- Tech Stack: ${tech}
 - Target Files: ${files}
 
-📁 Key Code & Configurations:
+🛠️ Key Code & Configurations:
 ${codeBlocksJoin(e.important_code)}
 
-🔑 Architecture Decisions:
+🔑 Key decisions made so far:
 ${decisions}
 
 ⚠️ Constraints & Limits:
 ${constraints}
 
-📋 Pending Actions:
+🎯 What I was working toward:
+- Objective: ${task}
+- Specific Intent: ${intent}
+
+📋 Tasks I was working on:
 ${pending}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
       }
 
       if (dominantIntent === 'debugging') {
-        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Debugging]
-You are continuing a critical software debugging session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+        return `[🔄 AI-Enhanced Cross Context Transfer — Debugging Briefing]
+I was working on debugging an issue with ${src}. Here is where we left off:
 
-📋 Project Summary:
-${summary}
-
-🎯 Core Debugging Target:
-- Objective: ${task}
-- Intent: ${intent}
-
-❌ Tracked Errors & Issues:
-${bulletJoin(e.errors_and_issues)}
-
-💡 Attempted Solves & Approaches:
-${bulletJoin(e.failed_attempts)}
-
-✅ Successful Solutions:
-${bulletJoin(e.successful_solutions)}
-
-💻 Tech Stack & Active Files:
-- Stack: ${tech}
+📁 What I was building & testing:
+- Project Summary: ${summary}
+- Tech Stack: ${tech}
 - Target Files: ${files}
 
-📁 Error-Prone Code Snippets:
+🛠️ Error-Prone Code Snippets:
 ${codeBlocksJoin(e.important_code)}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+❌ What I was stuck on:
+- Core Debugging Target: ${task}
+- Intent: ${intent}
+- Tracked Errors & Issues:
+${bulletJoin(e.errors_and_issues)}
+
+💡 Attempted Solves & Solutions:
+- Failed Attempts:
+${bulletJoin(e.failed_attempts)}
+- Successful Solutions:
+${bulletJoin(e.successful_solutions)}
+
+🚀 Please continue from:
 ${handoff}`;
       }
 
       if (dominantIntent === 'brainstorming') {
-        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Brainstorming & Planning]
-You are continuing a brainstorming, ideation, or product planning session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+        return `[🔄 AI-Enhanced Cross Context Transfer — Brainstorming Briefing]
+I was brainstorming and planning with ${src}. Here is where we left off:
 
-📋 Core Topic/Overview:
-${summary}
+📁 What I was building/planning:
+- Core Topic/Overview: ${summary}
+- Referenced Files: ${files || 'None recorded'}
 
-🎯 Brainstorming Goal:
-- Target Objective: ${task}
-- Intent/Vision: ${intent}
-
-💡 Deduplicated Key Concepts (Phase 2):
+💡 Key concepts & ideas developed:
 ${bulletJoin(e.deduplicated_context)}
 
-💭 Long Term Project Memory:
+🧠 Long term project memory:
 ${bulletJoin(e.long_term_memory)}
 
-🔑 Key Choices & Decisions:
+🔑 Key decisions made so far:
 ${decisions}
 
 ⚠️ Constraints & Limits:
 ${constraints}
 
-📋 Next Planning Actions:
+🎯 What I was working toward:
+- Target Objective: ${task}
+- Intent/Vision: ${intent}
+
+📋 Tasks I was working on:
 ${pending}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
       }
 
       if (dominantIntent === 'research') {
-        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Research & Studying]
-You are continuing a conceptual research or academic study session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+        return `[🔄 AI-Enhanced Cross Context Transfer — Research Briefing]
+I was researching and studying with ${src}. Here is where we left off:
 
-📋 Research Focus:
-${summary}
+📁 What I was researching:
+- Research Focus: ${summary}
+- Referenced Files & Sources: ${files || 'None recorded'}
 
-🎯 Study Target:
+💡 Core concepts discovered:
+${bulletJoin(e.deduplicated_context)}
+
+🧠 Long term project memory:
+${bulletJoin(e.long_term_memory)}
+
+🤖 AI-inferred insights:
+${bulletJoin(e.ai_inferred_context)}
+
+⚙️ My preferences:
+${bulletJoin(e.user_preferences)}
+
+🎯 What I was working toward:
 - Focus Area: ${task}
 - Knowledge Goal: ${intent}
 
-💡 Deduplicated Core Concepts:
-${bulletJoin(e.deduplicated_context)}
-
-💭 Long Term Project Memory:
-${bulletJoin(e.long_term_memory)}
-
-🤖 AI Inferred Intelligence Layer:
-${bulletJoin(e.ai_inferred_context)}
-
-⚙️ Developer/User Preferences:
-${bulletJoin(e.user_preferences)}
-
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
       }
 
       if (dominantIntent === 'writing') {
-        return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Composition & Writing]
-You are continuing a text composition or writing session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+        return `[🔄 AI-Enhanced Cross Context Transfer — Writing Briefing]
+I was drafting and composing text with ${src}. Here is where we left off:
 
-📋 Narrative/Content Overview:
-${summary}
+📁 What I was writing:
+- Narrative/Content Overview: ${summary}
+- Referenced Documents: ${files || 'None recorded'}
 
-🎯 Writing Objective:
+💡 Synthesized ideas & guidelines:
+${bulletJoin(e.deduplicated_context)}
+
+⚙️ My style preferences:
+${bulletJoin(e.user_preferences)}
+
+🎯 What I was working toward:
 - Current Target: ${task}
 - Creative Intent: ${intent}
 
-⚙️ Style Guidelines & Preferences:
-${bulletJoin(e.user_preferences)}
-
-💡 Synthesized Ideas & Contexts:
-${bulletJoin(e.deduplicated_context)}
-
-📋 Next Composition Steps:
+📋 Next composition steps:
 ${pending}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
       }
 
       // General fallback
-      return `[🔄 AI-Enhanced Cross Context Transfer]
-You are continuing a conversation that was started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
+      return `[🔄 AI-Enhanced Cross Context Transfer — Briefing]
+I was working on a project with ${src}. Here is where we left off:
 
-📋 Project Summary:
-${summary}
+📁 What I was building:
+- Project Summary: ${summary}
+- Tech Stack & Active Files: Stack: ${tech} | Files: ${files}
 
-🎯 Current Task & Intent:
-- Task: ${task}
-- Intent: ${intent}
-
-💻 Tech Stack & Active Files:
-- Stack: ${tech}
-- Files: ${files}
-
-🔑 Architecture Decisions:
+🔑 Key decisions made so far:
 ${decisions}
 
 ⚠️ Constraints & Limits:
 ${constraints}
 
-📋 Pending Tasks:
+🎯 What I was working toward:
+- Task: ${task}
+- Intent: ${intent}
+
+📋 Tasks I was working on:
 ${pending}
 
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
+🚀 Please continue from:
 ${handoff}`;
     }
 
@@ -2433,51 +2669,39 @@ ${handoff}`;
     const handoffHint = firstUser ? firstUser.content : 'Continue active working session';
     const handoffTruncated = handoffHint.length > 300 ? handoffHint.substring(0, 300) + '...' : handoffHint;
 
-    return `[🔄 Cross Context Transfer — State Restoration Continuity Protocol]
-You are continuing a software engineering and collaborative session started on ${src}.
-The active conversation context has been compiled into a structured Memory Graph by our Context Intelligence Engine to enable seamless continuation and absolute technical continuity.
+    return `[🔄 Cross Context Transfer — State Restoration Briefing]
+I was working on a project with ${src}. Here is where we left off:
 
-⚠️ COLLABORATOR CONTINUITY INSTRUCTIONS:
-1. CONTINUE INSTANTLY from the current state outlined below.
-2. DO NOT restart context, summarize the project, or re-explain topics.
-3. DO NOT re-introduce yourself or write conversational filler. Act as an active, ongoing pair-programmer/collaborator.
-4. Verify the active checklist and focus area and align immediately.
-
-════════════════════════════════════════════════════════════
-📋 DETERMINISTIC STATE RESTORATION PACKET
-════════════════════════════════════════════════════════════
-
-⚙️ SYSTEM CONTEXT:
-${packet.system_context}
-
-🧠 DISTILLED PRIORITY SPECIFICATIONS:
-${packet.priority_memory.map(m => `• ${m}`).join('\n') || 'None recorded'}
-
-🎯 ACTIVE TASKS Checklist:
-${packet.active_tasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
-
-❌ UNRESOLVED BLOCKERS & ISSUES:
-${packet.unresolved_issues.map(i => `• ${i}`).join('\n') || 'None active'}
-
-🔑 ARCHITECTURE & TECHNICAL DECISIONS:
-${packet.important_decisions.map(d => `• ${d}`).join('\n') || 'None recorded'}
-
-🔄 ACTIVE EXECUTION CONTEXT:
-- Current Focus Area: ${packet.execution_context.current_focus}
-- Core Topics Discussed: ${packet.execution_context.topics_discussed.join(', ') || 'None'}
-- Solved Problems & Closed Issues:
+⚙️ What I was building:
+- System Context: ${packet.system_context}
+- Active Execution Context:
+  - Current Focus Area: ${packet.execution_context.current_focus}
+  - Core Topics Discussed: ${packet.execution_context.topics_discussed.join(', ') || 'None'}
+  - Solved Problems & Closed Issues:
 ${packet.execution_context.problems_solved.map(p => `  ✓ ${p}`).join('\n') || '  None'}
-- Failed Approaches to Avoid:
+  - Failed Approaches to Avoid:
 ${packet.execution_context.approaches_to_avoid.map(a => `  ⚠️ ${a}`).join('\n') || '  None'}
 
-⚙️ DEVELOPER PREFERENCES:
+🧠 Distilled priority specifications:
+${packet.priority_memory.map(m => `• ${m}`).join('\n') || 'None recorded'}
+
+🔑 Key decisions made so far:
+${packet.important_decisions.map(d => `• ${d}`).join('\n') || 'None recorded'}
+
+❌ What I was stuck on (Unresolved Issues):
+${packet.unresolved_issues.map(i => `• ${i}`).join('\n') || 'None active'}
+
+⚙️ My preferences:
 ${packet.user_preferences.map(p => `• ${p}`).join('\n') || 'None configured'}
 
-════════════════════════════════════════════════════════════
-🚀 CONTINUATION FOCUS & HANDOFF:
+🎯 Tasks I was working on:
+${packet.active_tasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
+
+🚀 Please continue from:
 ${handoffTruncated}
-════════════════════════════════════════════════════════════
-Please confirm receipt of this context state. Acknowledge what tasks you are taking over, and ask the user what to focus on next to continue seamlessly.`;
+
+---
+Please acknowledge these details. Tell me what tasks you are taking over, and ask me what we should focus on next to continue seamlessly.`;
   }
 
   // ════════════════════════════════════════════
@@ -3324,6 +3548,12 @@ Please confirm receipt of this context state. Acknowledge what tasks you are tak
           endScrapingSession();
         }
       })();
+      return true;
+    }
+
+    // Respond to PING from background for poll-based injection readiness
+    if (message.type === 'PING') {
+      sendResponse({ alive: true });
       return true;
     }
 

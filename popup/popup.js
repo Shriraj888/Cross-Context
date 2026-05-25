@@ -1,6 +1,8 @@
 // Cross Context — Popup Script
 'use strict';
 
+import { ContextIntelligenceEngine, formatContextPrompt } from '../utils/formatter.js';
+
 // ──────────────────────────────────────────
 // Platform Configuration
 // ──────────────────────────────────────────
@@ -97,8 +99,10 @@ const previewContent      = $('preview-content');
 // New Preview tabs and panels
 const previewTabs         = $('preview-tabs');
 const tabAiSummary        = $('tab-ai-summary');
+const tabMemoryGraph      = $('tab-memory-graph');
 const tabRawTranscript    = $('tab-raw-transcript');
 const previewContentAi    = $('preview-content-ai');
+const previewContentGraph = $('preview-content-graph');
 
 // Settings modal elements
 const settingsModal       = $('settings-modal');
@@ -132,21 +136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadContexts();
   await loadSettings();
 
-  // Listen for storage changes to auto-update cards and active preview modal in real-time
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.contexts) {
-      savedContexts = changes.contexts.newValue || [];
-      renderContexts();
-      if (currentPreviewId) {
-        const active = savedContexts.find(c => c.id === currentPreviewId);
-        if (active) {
-          renderPreviewContent(active);
-        } else {
-          closePreviewModal();
-        }
-      }
-    }
-  });
+
   
   if (window.location.protocol === 'file:' && savedContexts.length === 0) {
     savedContexts = [
@@ -169,6 +159,27 @@ document.addEventListener('DOMContentLoaded', async () => {
             'Passed to application state using .app_data(web::Data::new(pool))'
           ],
           handoffPrompt: '[🔄 AI-Enhanced Cross Context Transfer]\nThe user is building a Rust web server using Actix-web and SQLx. They need help setting up the PgPool connection pool and passing it into Actix web application state.'
+        },
+        memoryGraph: {
+          nodes: [
+            { id: 'project_root', type: 'PROJECT', label: 'Rust Actix-web Server' },
+            { id: 'tech_rust', type: 'TECH_STACK', label: 'Rust', properties: { name: 'Rust' } },
+            { id: 'tech_actix_web', type: 'TECH_STACK', label: 'Actix-web', properties: { name: 'Actix-web' } },
+            { id: 'tech_sqlx', type: 'TECH_STACK', label: 'SQLx', properties: { name: 'SQLx' } },
+            { id: 'ai_dec_0', type: 'DECISION', label: 'Initialize connection pool in main fn' },
+            { id: 'ai_task_0', type: 'TASK', label: 'Pass PgPool using .app_data()' },
+            { id: 'ai_issue_0', type: 'ISSUE', label: 'Blocked by database migration checks' }
+          ],
+          edges: [
+            { from: 'tech_rust', to: 'project_root', type: 'IMPLEMENTED_WITH' },
+            { from: 'tech_actix_web', to: 'project_root', type: 'IMPLEMENTED_WITH' },
+            { from: 'tech_sqlx', to: 'project_root', type: 'IMPLEMENTED_WITH' },
+            { from: 'ai_dec_0', to: 'project_root', type: 'RELATED_TO' },
+            { from: 'ai_task_0', to: 'project_root', type: 'DEPENDS_ON' },
+            { from: 'ai_issue_0', to: 'project_root', type: 'BLOCKED_BY' },
+            { from: 'ai_task_0', to: 'tech_actix_web', type: 'RELATED_TO' },
+            { from: 'ai_dec_0', to: 'tech_sqlx', type: 'RELATED_TO' }
+          ]
         }
       },
       {
@@ -181,7 +192,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         ],
         messageCount: 4,
         timestamp: Date.now() - 3600000 * 24,
-        aiStatus: 'idle'
+        aiStatus: 'idle',
+        memoryGraph: {
+          nodes: [
+            { id: 'project_root', type: 'PROJECT', label: 'React useDebounce Hook' },
+            { id: 'tech_react', type: 'TECH_STACK', label: 'React', properties: { name: 'React' } },
+            { id: 'tech_javascript', type: 'TECH_STACK', label: 'JavaScript', properties: { name: 'JavaScript' } },
+            { id: 'tech_typescript', type: 'TECH_STACK', label: 'TypeScript', properties: { name: 'TypeScript' } },
+            { id: 'msg_0_task_0', type: 'TASK', label: 'Create a custom hook useDebounce' },
+            { id: 'msg_1_dec_0', type: 'DECISION', label: 'Using useEffect and setTimeout for debouncing' }
+          ],
+          edges: [
+            { from: 'tech_react', to: 'project_root', type: 'IMPLEMENTED_WITH' },
+            { from: 'tech_javascript', to: 'project_root', type: 'IMPLEMENTED_WITH' },
+            { from: 'tech_typescript', to: 'project_root', type: 'IMPLEMENTED_WITH' },
+            { from: 'msg_0_task_0', to: 'project_root', type: 'DEPENDS_ON' },
+            { from: 'msg_1_dec_0', to: 'project_root', type: 'RELATED_TO' }
+          ]
+        }
       }
     ];
     renderContexts();
@@ -353,6 +381,17 @@ function createContextCard(ctx) {
       </svg>
     </span>`;
   }
+  // Truncation warning badge
+  let truncatedBadgeHtml = '';
+  if (ctx.truncated) {
+    truncatedBadgeHtml = `<span class="card-ai-badge truncated" title="Conversation was truncated to fit transfer limits">
+      <svg class="ai-badge-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+    </span>`;
+  }
 
   // Filter platforms to other platforms for quick handoff targets
   const targets = Object.keys(PLATFORMS).filter(p => p !== ctx.platform);
@@ -382,6 +421,7 @@ function createContextCard(ctx) {
         </div>
       </div>
       <div class="card-right">
+        ${truncatedBadgeHtml}
         ${aiBadgeHtml}
       </div>
     </div>
@@ -730,7 +770,8 @@ function openPreviewModal(contextId) {
   if (!ctx) return;
 
   currentPreviewId = contextId;
-  currentPreviewTab = 'ai-summary'; // default tab
+  const isAi = (ctx.aiEnhanced && ctx.aiStatus === 'success') || ctx.aiStatus === 'pending';
+  currentPreviewTab = isAi ? 'ai-summary' : 'memory-graph';
   renderPreviewContent(ctx);
   previewModal.classList.remove('hidden');
 }
@@ -747,13 +788,25 @@ function closePreviewModal() {
 function renderPreviewContent(ctx) {
   previewContent.innerHTML = '';
   previewContentAi.innerHTML = '';
+  previewContentGraph.innerHTML = '';
 
   const isAiEnhanced = ctx.aiEnhanced && ctx.aiStatus === 'success';
   const isAiPending = ctx.aiStatus === 'pending';
 
-  if (isAiEnhanced || isAiPending) {
-    previewTabs.classList.remove('hidden');
+  // Always show tabs now since we have a Memory Graph tab for everyone!
+  previewTabs.classList.remove('hidden');
 
+  // Control visibility of the AI Summary tab button
+  if (isAiEnhanced || isAiPending) {
+    tabAiSummary.classList.remove('hidden');
+  } else {
+    tabAiSummary.classList.add('hidden');
+    if (currentPreviewTab === 'ai-summary') {
+      currentPreviewTab = 'memory-graph';
+    }
+  }
+
+  if (isAiEnhanced || isAiPending) {
     if (isAiPending) {
       if (pendingLoaderInterval) {
         clearInterval(pendingLoaderInterval);
@@ -1216,53 +1269,36 @@ function renderPreviewContent(ctx) {
     `;
     }
 
-    // Manage tab visibility class toggling
-    if (currentPreviewTab === 'ai-summary') {
-      previewContentAi.classList.remove('hidden');
-      previewContent.classList.add('hidden');
-      tabAiSummary.classList.add('active');
-      tabRawTranscript.classList.remove('active');
-    } else {
-      previewContentAi.classList.add('hidden');
-      previewContent.classList.remove('hidden');
-      tabAiSummary.classList.remove('active');
-      tabRawTranscript.classList.add('active');
-    }
-
     // Attach prompt copy click
-    const copyBtn = previewContentAi.querySelector('#btn-copy-ai-prompt');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(e.handoffPrompt);
-        showToast('✓ Handoff prompt copied!', 'success');
+    if (isAiEnhanced) {
+      const copyBtn = previewContentAi.querySelector('#btn-copy-ai-prompt');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+          navigator.clipboard.writeText(e.handoffPrompt);
+          showToast('✓ Handoff prompt copied!', 'success');
+        });
+      }
+
+      // Attach snippets copy click
+      const snippetCopyBtns = previewContentAi.querySelectorAll('.ai-code-copy-btn');
+      snippetCopyBtns.forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const codeText = btn.dataset.code;
+          navigator.clipboard.writeText(codeText);
+          showToast('✓ Code snippet copied!', 'success');
+        });
+      });
+
+      // Attach full-screen thumbnail zoom viewer click
+      const thumbs = previewContentAi.querySelectorAll('.ai-image-thumbnail img');
+      thumbs.forEach(thumb => {
+        thumb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openFullscreenImage(thumb.src);
+        });
       });
     }
-
-    // Attach snippets copy click
-    const snippetCopyBtns = previewContentAi.querySelectorAll('.ai-code-copy-btn');
-    snippetCopyBtns.forEach(btn => {
-      btn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        const codeText = btn.dataset.code;
-        navigator.clipboard.writeText(codeText);
-        showToast('✓ Code snippet copied!', 'success');
-      });
-    });
-
-    // Attach full-screen thumbnail zoom viewer click
-    const thumbs = previewContentAi.querySelectorAll('.ai-image-thumbnail img');
-    thumbs.forEach(thumb => {
-      thumb.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openFullscreenImage(thumb.src);
-      });
-    });
-
-  } else {
-    // Hide tabs, show only raw transcript if not enhanced
-    previewTabs.classList.add('hidden');
-    previewContentAi.classList.add('hidden');
-    previewContent.classList.remove('hidden');
   }
 
   // Render raw transcript layout
@@ -1317,6 +1353,519 @@ function renderPreviewContent(ctx) {
       });
     });
   });
+
+  // Render Memory Graph layout
+  renderMemoryGraph(ctx);
+
+  // Manage tab visibility class toggling
+  tabAiSummary.classList.remove('active');
+  tabMemoryGraph.classList.remove('active');
+  tabRawTranscript.classList.remove('active');
+
+  previewContentAi.classList.add('hidden');
+  previewContentGraph.classList.add('hidden');
+  previewContent.classList.add('hidden');
+
+  if (currentPreviewTab === 'ai-summary') {
+    tabAiSummary.classList.add('active');
+    previewContentAi.classList.remove('hidden');
+  } else if (currentPreviewTab === 'memory-graph') {
+    tabMemoryGraph.classList.add('active');
+    previewContentGraph.classList.remove('hidden');
+  } else if (currentPreviewTab === 'scraped-data') {
+    tabRawTranscript.classList.add('active');
+    previewContent.classList.remove('hidden');
+  }
+}
+
+function renderMemoryGraph(ctx) {
+  let graph = ctx.memoryGraph;
+  if (!graph) {
+    const engine = new ContextIntelligenceEngine();
+    engine.processConversation(ctx.messages);
+    graph = {
+      nodes: Array.from(engine.nodes.entries()).map(([id, node]) => ({ id, ...node })),
+      edges: engine.edges
+    };
+  }
+
+  if (!graph.nodes || graph.nodes.length <= 1) {
+    previewContentGraph.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🕸️</div>
+        <p class="empty-title">Insufficient Graph Data</p>
+        <p class="empty-sub">Add tasks, tech stack keyword terms, architecture decisions, or error bugs to build a relationship network.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const container = document.createElement('div');
+  container.className = 'graph-details-container';
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.gap = '12px';
+  container.style.height = '100%';
+  container.style.overflow = 'hidden';
+
+  const canvasContainer = document.createElement('div');
+  canvasContainer.className = 'graph-canvas-container';
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'graph-tooltip hidden';
+  canvasContainer.appendChild(tooltip);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'graph-svg');
+  canvasContainer.appendChild(svg);
+  container.appendChild(canvasContainer);
+
+  // Deep clone nodes and edges for layout calculations
+  const nodes = graph.nodes.map(n => ({ ...n }));
+  const edges = graph.edges.map(e => ({ ...e }));
+
+  const width = 356;
+  const height = 220;
+  const cx = width / 2;
+  const cy = height / 2;
+
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+  // Inject gradients and filters
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = `
+    <!-- Shadows & Glows -->
+    <filter id="node-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+
+    <!-- Linear Gradients for Nodes -->
+    <linearGradient id="grad-PROJECT" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <linearGradient id="grad-TECH_STACK" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="grad-TASK" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <linearGradient id="grad-DECISION" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="grad-ISSUE" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f87171" />
+      <stop offset="100%" stop-color="#dc2626" />
+    </linearGradient>
+    <linearGradient id="grad-PREFERENCE" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a3a3a3" />
+      <stop offset="100%" stop-color="#525252" />
+    </linearGradient>
+  `;
+  svg.appendChild(defs);
+
+  // Initialize node positions deterministically in a circle around the project root
+  const nonRootNodes = nodes.filter(n => n.id !== 'project_root');
+  nodes.forEach(n => {
+    if (n.id === 'project_root') {
+      n.x = cx;
+      n.y = cy;
+      n.fixed = true;
+    }
+  });
+  nonRootNodes.forEach((n, idx) => {
+    const angle = (idx / (nonRootNodes.length || 1)) * 2 * Math.PI;
+    const rDist = 65; // radius distance from root
+    n.x = cx + Math.cos(angle) * rDist;
+    n.y = cy + Math.sin(angle) * rDist;
+  });
+
+  const k = Math.sqrt((width * height) / (nodes.length || 1));
+  const repelForce = 1.6;
+  const attractForce = 0.08;
+  const gravityForce = 0.04;
+  const iterations = 150;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // 1. Repel
+    for (let i = 0; i < nodes.length; i++) {
+      const n1 = nodes[i];
+      n1.fx = 0;
+      n1.fy = 0;
+      for (let j = 0; j < nodes.length; j++) {
+        if (i === j) continue;
+        const n2 = nodes[j];
+        const dx = n1.x - n2.x;
+        const dy = n1.y - n2.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (dist < 80) {
+          const force = ((k * k) / dist) * repelForce;
+          n1.fx += (dx / dist) * force;
+          n1.fy += (dy / dist) * force;
+        }
+      }
+    }
+
+    // 2. Attract
+    edges.forEach(e => {
+      const n1 = nodes.find(n => n.id === e.from);
+      const n2 = nodes.find(n => n.id === e.to);
+      if (n1 && n2) {
+        const dx = n1.x - n2.x;
+        const dy = n1.y - n2.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const force = dist * attractForce;
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+
+        if (!n1.fixed) {
+          n1.fx -= fx;
+          n1.fy -= fy;
+        }
+        if (!n2.fixed) {
+          n2.fx += fx;
+          n2.fy += fy;
+        }
+      }
+    });
+
+    // 3. Update
+    nodes.forEach(n => {
+      if (n.fixed) return;
+      const dx = cx - n.x;
+      const dy = cy - n.y;
+      n.fx += dx * gravityForce;
+      n.fy += dy * gravityForce;
+
+      const speed = Math.sqrt(n.fx * n.fx + n.fy * n.fy);
+      const maxSpeed = 8;
+      if (speed > maxSpeed) {
+        n.fx = (n.fx / speed) * maxSpeed;
+        n.fy = (n.fy / speed) * maxSpeed;
+      }
+      n.x += n.fx;
+      n.y += n.fy;
+
+      n.x = Math.max(16, Math.min(width - 16, n.x));
+      n.y = Math.max(16, Math.min(height - 16, n.y));
+    });
+  }
+
+  // Draw edges
+  const edgeElements = [];
+  edges.forEach(e => {
+    const n1 = nodes.find(n => n.id === e.from);
+    const n2 = nodes.find(n => n.id === e.to);
+    if (n1 && n2) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', n1.x);
+      line.setAttribute('y1', n1.y);
+      line.setAttribute('x2', n2.x);
+      line.setAttribute('y2', n2.y);
+      line.setAttribute('class', 'graph-edge');
+      line.dataset.from = e.from;
+      line.dataset.to = e.to;
+      line.dataset.type = e.type;
+      svg.appendChild(line);
+      edgeElements.push({ data: e, el: line });
+    }
+  });
+
+  // Draw nodes
+  const nodeElements = [];
+  nodes.forEach(n => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', `graph-node type-${n.type}`);
+    g.dataset.id = n.id;
+
+    const radius = n.id === 'project_root' ? 14 : 9.5;
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', n.x);
+    circle.setAttribute('cy', n.y);
+    circle.setAttribute('r', radius);
+    circle.setAttribute('fill', `url(#grad-${n.type})`);
+    circle.setAttribute('filter', 'url(#node-shadow)');
+    circle.setAttribute('stroke', n.id === 'project_root' ? '#c084fc' : '#ffffff');
+    circle.setAttribute('stroke-opacity', '0.25');
+    circle.setAttribute('stroke-width', '1');
+
+    const strokeColors = {
+      PROJECT: '#a78bfa',
+      TECH_STACK: '#38bdf8',
+      TASK: '#fbbf24',
+      DECISION: '#34d399',
+      ISSUE: '#f87171',
+      PREFERENCE: '#a3a3a3'
+    };
+    g.style.setProperty('--node-stroke-color', strokeColors[n.type] || '#a78bfa');
+
+    // Emoji centered inside the circle
+    const emojis = {
+      PROJECT: '🏠',
+      TECH_STACK: '💻',
+      TASK: '🎯',
+      DECISION: '🔑',
+      ISSUE: '⚠️',
+      PREFERENCE: '⚙️'
+    };
+    const emoji = emojis[n.type] || '❓';
+
+    const emojiText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    emojiText.setAttribute('x', n.x);
+    emojiText.setAttribute('y', n.y);
+    emojiText.setAttribute('text-anchor', 'middle');
+    emojiText.setAttribute('dominant-baseline', 'central');
+    emojiText.style.fontSize = n.id === 'project_root' ? '12px' : '8.5px';
+    emojiText.style.pointerEvents = 'none';
+    emojiText.style.userSelect = 'none';
+    emojiText.textContent = emoji;
+
+    // Label styling with halo shadow
+    let cleanLabel = n.label || '';
+    if (n.id === 'project_root') {
+      cleanLabel = ctx.platform.toUpperCase();
+    } else {
+      if (cleanLabel.length > 14) {
+        cleanLabel = cleanLabel.substring(0, 12) + '...';
+      }
+    }
+
+    const textShadow = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    textShadow.setAttribute('x', n.x);
+    textShadow.setAttribute('y', n.y + radius + 11);
+    textShadow.setAttribute('text-anchor', 'middle');
+    textShadow.setAttribute('class', 'node-label-shadow');
+    textShadow.textContent = cleanLabel;
+
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', n.x);
+    text.setAttribute('y', n.y + radius + 11);
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('class', 'node-label');
+    text.textContent = cleanLabel;
+
+    g.appendChild(circle);
+    g.appendChild(emojiText);
+    g.appendChild(textShadow);
+    g.appendChild(text);
+    svg.appendChild(g);
+    
+    nodeElements.push({ data: n, el: g });
+  });
+
+  // Locked highlighting state
+  let lockedNodeId = null;
+
+  const showTooltip = (node) => {
+    const emojis = {
+      PROJECT: '🏠',
+      TECH_STACK: '💻',
+      TASK: '🎯',
+      DECISION: '🔑',
+      ISSUE: '⚠️',
+      PREFERENCE: '⚙️'
+    };
+    const emoji = emojis[node.type] || '❓';
+    const typeLabel = node.type.replace('_', ' ');
+    
+    tooltip.innerHTML = `
+      <div class="graph-tooltip-header">
+        <span class="graph-tooltip-type ${node.type.toLowerCase()}">${typeLabel}</span>
+        <span class="graph-tooltip-label">${emoji} ${escapeHtml(node.label)}</span>
+      </div>
+      ${node.properties?.description ? `<div class="graph-tooltip-desc">${escapeHtml(node.properties.description)}</div>` : ''}
+    `;
+    tooltip.classList.remove('hidden');
+  };
+
+  const hideTooltip = () => {
+    tooltip.classList.add('hidden');
+  };
+
+  const highlightConnected = (nodeId) => {
+    const connectedNodeIds = new Set([nodeId]);
+    
+    edgeElements.forEach(edge => {
+      if (edge.data.from === nodeId) {
+        connectedNodeIds.add(edge.data.to);
+        edge.el.classList.add('highlighted');
+        edge.el.classList.remove('dimmed');
+      } else if (edge.data.to === nodeId) {
+        connectedNodeIds.add(edge.data.from);
+        edge.el.classList.add('highlighted');
+        edge.el.classList.remove('dimmed');
+      } else {
+        edge.el.classList.add('dimmed');
+        edge.el.classList.remove('highlighted');
+      }
+    });
+
+    nodeElements.forEach(node => {
+      if (connectedNodeIds.has(node.data.id)) {
+        node.el.classList.add('highlighted');
+        node.el.classList.remove('dimmed');
+      } else {
+        node.el.classList.add('dimmed');
+        node.el.classList.remove('highlighted');
+      }
+    });
+
+    const cards = container.querySelectorAll('.graph-item-card');
+    cards.forEach(card => {
+      if (card.dataset.id === nodeId) {
+        card.classList.add('highlighted');
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else {
+        card.classList.remove('highlighted');
+      }
+    });
+  };
+
+  const resetHighlight = () => {
+    nodeElements.forEach(node => {
+      node.el.classList.remove('highlighted', 'dimmed');
+    });
+    edgeElements.forEach(edge => {
+      edge.el.classList.remove('highlighted', 'dimmed');
+    });
+    const cards = container.querySelectorAll('.graph-item-card');
+    cards.forEach(card => {
+      card.classList.remove('highlighted');
+    });
+    hideTooltip();
+  };
+
+  const handleMouseEnter = (nodeId) => {
+    const nodeObj = nodes.find(n => n.id === nodeId);
+    if (nodeObj) {
+      showTooltip(nodeObj);
+    }
+    highlightConnected(nodeId);
+  };
+
+  const handleMouseLeave = () => {
+    if (lockedNodeId) {
+      highlightConnected(lockedNodeId);
+      const lockedNodeObj = nodes.find(n => n.id === lockedNodeId);
+      if (lockedNodeObj) {
+        showTooltip(lockedNodeObj);
+      }
+    } else {
+      resetHighlight();
+    }
+  };
+
+  const handleNodeClick = (nodeId, event) => {
+    if (event) event.stopPropagation();
+    if (lockedNodeId === nodeId) {
+      lockedNodeId = null;
+      resetHighlight();
+    } else {
+      lockedNodeId = nodeId;
+      highlightConnected(nodeId);
+      const nodeObj = nodes.find(n => n.id === nodeId);
+      if (nodeObj) {
+        showTooltip(nodeObj);
+      }
+    }
+  };
+
+  nodeElements.forEach(node => {
+    node.el.addEventListener('mouseenter', () => {
+      handleMouseEnter(node.data.id);
+    });
+    node.el.addEventListener('mouseleave', () => {
+      handleMouseLeave();
+    });
+    node.el.addEventListener('click', (e) => {
+      handleNodeClick(node.data.id, e);
+    });
+  });
+
+  svg.addEventListener('click', (e) => {
+    if (e.target === svg) {
+      lockedNodeId = null;
+      resetHighlight();
+    }
+  });
+
+  // Categorized detailed lists
+  const detailsList = document.createElement('div');
+  detailsList.className = 'graph-details-list';
+
+  const categories = {
+    TECH_STACK: { title: 'Technical Stack', color: '#38bdf8', items: [] },
+    TASK: { title: 'Active Tasks & TODOs', color: '#fbbf24', items: [] },
+    DECISION: { title: 'Architecture Decisions', color: '#34d399', items: [] },
+    ISSUE: { title: 'Errors & Issues Tracked', color: '#f87171', items: [] },
+    PREFERENCE: { title: 'User Preferences', color: '#a3a3a3', items: [] }
+  };
+
+  graph.nodes.forEach(n => {
+    if (categories[n.type]) {
+      categories[n.type].items.push(n);
+    }
+  });
+
+  for (const [type, cat] of Object.entries(categories)) {
+    if (cat.items.length === 0) continue;
+
+    const catSection = document.createElement('div');
+    catSection.className = 'graph-category-section';
+
+    const catTitle = document.createElement('div');
+    catTitle.className = 'graph-category-title';
+    catTitle.innerHTML = `
+      <span style="color: ${cat.color};">✦</span>
+      <span>${cat.title}</span>
+    `;
+    catSection.appendChild(catTitle);
+
+    const itemGrid = document.createElement('div');
+    itemGrid.className = 'graph-item-grid';
+
+    cat.items.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'graph-item-card';
+      card.dataset.id = item.id;
+      card.style.setProperty('--item-stroke-color', cat.color);
+      card.style.setProperty('--item-bg-color', `${cat.color}08`);
+      card.style.setProperty('--item-text-color', '#ffffff');
+      card.style.setProperty('--item-glow-color', `${cat.color}15`);
+
+      const bullet = document.createElement('span');
+      bullet.className = 'graph-item-bullet';
+      bullet.style.setProperty('--bullet-color', cat.color);
+
+      const content = document.createElement('div');
+      content.className = 'graph-item-content';
+      content.textContent = item.label;
+
+      card.appendChild(bullet);
+      card.appendChild(content);
+
+      card.addEventListener('mouseenter', () => {
+        handleMouseEnter(item.id);
+      });
+      card.addEventListener('mouseleave', () => {
+        handleMouseLeave();
+      });
+      card.addEventListener('click', (e) => {
+        handleNodeClick(item.id, e);
+      });
+
+      itemGrid.appendChild(card);
+    });
+
+    catSection.appendChild(itemGrid);
+    detailsList.appendChild(catSection);
+  }
+
+  container.appendChild(detailsList);
+  previewContentGraph.appendChild(container);
 }
 
 function openFullscreenImage(src) {
@@ -1429,6 +1978,12 @@ function setupTabListeners() {
     if (ctx) renderPreviewContent(ctx);
   });
 
+  tabMemoryGraph.addEventListener('click', () => {
+    currentPreviewTab = 'memory-graph';
+    const ctx = savedContexts.find(c => c.id === currentPreviewId);
+    if (ctx) renderPreviewContent(ctx);
+  });
+
   tabRawTranscript.addEventListener('click', () => {
     currentPreviewTab = 'scraped-data';
     const ctx = savedContexts.find(c => c.id === currentPreviewId);
@@ -1529,274 +2084,4 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-const PLATFORM_NAMES = {
-  claude:     'Claude (Anthropic)',
-  chatgpt:    'ChatGPT (OpenAI)',
-  gemini:     'Gemini (Google)',
-  grok:       'Grok (xAI)',
-  perplexity: 'Perplexity AI',
-};
 
-function formatContextPrompt(context) {
-  // If the context has been successfully enhanced by Gemini AI, use the structured handoff package
-  if (context.aiEnhanced && context.aiStatus === 'success') {
-    const src = PLATFORM_NAMES[context.platform] || context.platform;
-    const e = context.aiEnhanced;
-    const summary = e.project_summary || '';
-    const task = e.current_task || '';
-    const intent = e.user_intent || '';
-    const tech = Array.isArray(e.technical_stack) ? e.technical_stack.join(', ') : '';
-    const decisions = Array.isArray(e.architecture_decisions)
-      ? e.architecture_decisions.map(pt => `• ${pt}`).join('\n')
-      : '';
-    const constraints = Array.isArray(e.constraints) ? e.constraints.join(', ') : '';
-    const pending = Array.isArray(e.pending_tasks) ? e.pending_tasks.map(pt => `• ${pt}`).join('\n') : '';
-    const handoff = e.handoffPrompt || '';
-
-    // List builders helper
-    const bulletJoin = (arr) => (Array.isArray(arr) && arr.length) ? arr.map(x => `• ${x}`).join('\n') : 'None recorded';
-    const codeBlocksJoin = (arr) => {
-      if (!Array.isArray(arr) || !arr.length) return 'No snippets recorded';
-      return arr.map((code, i) => `--- Snippet #${i + 1} ---\n${code}`).join('\n\n');
-    };
-
-    // Detect Dominant Intent
-    const types = Array.isArray(e.conversation_type) ? e.conversation_type.map(t => t.toLowerCase()) : [];
-    let dominantIntent = 'general';
-    if (types.includes('coding') || types.includes('architecture design')) {
-      dominantIntent = 'coding';
-    } else if (types.includes('debugging')) {
-      dominantIntent = 'debugging';
-    } else if (types.includes('brainstorming') || types.includes('planning')) {
-      dominantIntent = 'brainstorming';
-    } else if (types.includes('research') || types.includes('studying')) {
-      dominantIntent = 'research';
-    } else if (types.includes('writing')) {
-      dominantIntent = 'writing';
-    }
-
-    const divider = '═'.repeat(60);
-
-    if (dominantIntent === 'coding') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Coding]
-You are continuing a software development and implementation session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
-
-📋 Project Summary:
-${summary}
-
-🎯 Current Coding Objective:
-- Objective: ${task}
-- Specific Intent: ${intent}
-
-💻 Tech Stack:
-- Stack: ${tech}
-
-📁 Key Code & Configurations:
-${codeBlocksJoin(e.important_code)}
-
-🔑 Architecture Decisions:
-${decisions}
-
-⚠️ Constraints & Limits:
-${constraints}
-
-📋 Pending Actions:
-${pending}
-
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
-${handoff}`;
-    }
-
-    if (dominantIntent === 'debugging') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Debugging]
-You are continuing a critical software debugging session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
-
-📋 Project Summary:
-${summary}
-
-🎯 Core Debugging Target:
-- Objective: ${task}
-- Intent: ${intent}
-
-❌ Tracked Errors & Issues:
-${bulletJoin(e.errors_and_issues)}
-
-💡 Attempted Solves & Approaches:
-${bulletJoin(e.failed_attempts)}
-
-✅ Successful Solutions:
-${bulletJoin(e.successful_solutions)}
-
-💻 Tech Stack:
-- Stack: ${tech}
-
-📁 Error-Prone Code Snippets:
-${codeBlocksJoin(e.important_code)}
-
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
-${handoff}`;
-    }
-
-    if (dominantIntent === 'brainstorming') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Brainstorming & Planning]
-You are continuing a brainstorming, ideation, or product planning session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
-
-📋 Core Topic/Overview:
-${summary}
-
-🎯 Brainstorming Goal:
-- Target Objective: ${task}
-- Intent/Vision: ${intent}
-
-💡 Deduplicated Key Concepts (Phase 2):
-${bulletJoin(e.deduplicated_context)}
-
-💭 Long Term Project Memory:
-${bulletJoin(e.long_term_memory)}
-
-🔑 Key Choices & Decisions:
-${decisions}
-
-⚠️ Constraints & Limits:
-${constraints}
-
-📋 Next Planning Actions:
-${pending}
-
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
-${handoff}`;
-    }
-
-    if (dominantIntent === 'research') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Research & Studying]
-You are continuing a conceptual research or academic study session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
-
-📋 Research Focus:
-${summary}
-
-🎯 Study Target:
-- Focus Area: ${task}
-- Knowledge Goal: ${intent}
-
-💡 Deduplicated Core Concepts:
-${bulletJoin(e.deduplicated_context)}
-
-💭 Long Term Project Memory:
-${bulletJoin(e.long_term_memory)}
-
-🤖 AI Inferred Intelligence Layer:
-${bulletJoin(e.ai_inferred_context)}
-
-⚙️ Developer/User Preferences:
-${bulletJoin(e.user_preferences)}
-
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
-${handoff}`;
-    }
-
-    if (dominantIntent === 'writing') {
-      return `[🔄 AI-Enhanced Cross Context Transfer — Optimized for Composition & Writing]
-You are continuing a text composition or writing session started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
-
-📋 Narrative/Content Overview:
-${summary}
-
-🎯 Writing Objective:
-- Current Target: ${task}
-- Creative Intent: ${intent}
-
-⚙️ Style Guidelines & Preferences:
-${bulletJoin(e.user_preferences)}
-
-💡 Synthesized Ideas & Contexts:
-${bulletJoin(e.deduplicated_context)}
-
-📋 Next Composition Steps:
-${pending}
-
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
-${handoff}`;
-    }
-
-    // Fallback general
-    return `[🔄 AI-Enhanced Cross Context Transfer]
-You are continuing a conversation that was started on ${src}.
-The conversation history has been processed, verified, and distilled by the Advanced AI Context Distillation Engine.
-
-📋 Project Summary:
-${summary}
-
-🎯 Current Task & Intent:
-- Task: ${task}
-- Intent: ${intent}
-
-💻 Tech Stack:
-- Stack: ${tech}
-
-🔑 Architecture Decisions:
-${decisions}
-
-⚠️ Constraints & Limits:
-${constraints}
-
-📋 Pending Tasks:
-${pending}
-
-${divider}
-🚀 Optimized Handoff Prompt & Instructions:
-${handoff}`;
-  }
-
-  const MAX_TURNS  = 40;
-  const CHAR_LIMIT = 80000;
-
-  let msgs = [...context.messages];
-  let truncated = false;
-
-  if (msgs.length > MAX_TURNS) {
-    msgs = msgs.slice(msgs.length - MAX_TURNS);
-    truncated = true;
-  }
-
-  let transcript = '';
-  let chars = 0;
-
-  for (const msg of msgs) {
-    const label = msg.role === 'user' ? '👤 User' : '🤖 Assistant';
-    const line  = `${label}:\n${msg.content}\n\n`;
-    if (chars + line.length > CHAR_LIMIT) { truncated = true; break; }
-    transcript += line;
-    chars += line.length;
-  }
-
-  const src = PLATFORM_NAMES[context.platform] || context.platform;
-  const note = truncated ? `\n⚠️ Note: Partial history (last ${MAX_TURNS} turns shown due to length).\n` : '';
-  const div  = '═'.repeat(60);
-
-  return `[🔄 Cross Context Transfer]
-You are continuing a conversation that was started on ${src}.
-The user reached the free-tier limit there and needs your help to continue seamlessly.${note}
-Please read the conversation history below, then acknowledge you understand the context and are ready to help. Do NOT re-introduce yourself — just confirm you have the context.
-
-${div}
-📋 Conversation History (${msgs.length} messages from ${src})
-${div}
-
-${transcript.trim()}
-
-${div}
-✅ End of conversation history from ${src}
-${div}
-
-Please confirm you have the full context above and are ready to continue the conversation.`;
-}
