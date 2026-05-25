@@ -144,6 +144,9 @@ export class ContextIntelligenceEngine {
       }
 
       if (hop < maxHops) {
+        // Core CE optimization: Do not traverse through project_root to unrelated siblings
+        if (id === 'project_root') continue;
+
         this.edges.forEach(edge => {
           if (edge.from === id && !visited.has(edge.to)) {
             visited.add(edge.to);
@@ -173,6 +176,7 @@ export class ContextIntelligenceEngine {
       const role = msg.role || 'user';
       const score = this.scoreMessage(content, role);
       const msgId = `msg_${messageIndex++}`;
+      const messageNodes = [];
 
       // Track Execution Context Topics & Solved problems deterministically
       if (content.toLowerCase().includes('solved') || content.toLowerCase().includes('fixed') || content.toLowerCase().includes('working now')) {
@@ -208,6 +212,7 @@ export class ContextIntelligenceEngine {
           this.addNode(techId, 'TECH_STACK', tech.toUpperCase(), { name: tech });
           this.addEdge(techId, 'project_root', 'IMPLEMENTED_WITH');
           this.executionContext.topicsDiscussed.add(tech);
+          messageNodes.push(techId);
         }
       });
 
@@ -222,12 +227,14 @@ export class ContextIntelligenceEngine {
             const isCompleted = trimmed.includes('[x]');
             this.addNode(taskId, 'TASK', cleanLabel, { status: isCompleted ? 'completed' : 'active' });
             this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
+            messageNodes.push(taskId);
           }
         } else if (trimmed.toLowerCase().startsWith('todo:') || trimmed.toLowerCase().startsWith('task:')) {
           const cleanLabel = trimmed.replace(/^(todo|task):\s*/i, '').trim();
           if (cleanLabel.length > 5) {
             this.addNode(taskId, 'TASK', cleanLabel, { status: 'active' });
             this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
+            messageNodes.push(taskId);
           }
         }
       });
@@ -243,6 +250,7 @@ export class ContextIntelligenceEngine {
               if (cleanLabel.length > 12) {
                 this.addNode(taskId, 'TASK', cleanLabel, { status: 'active' });
                 this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
+                messageNodes.push(taskId);
               }
             }
           });
@@ -260,6 +268,7 @@ export class ContextIntelligenceEngine {
             if (cleanLabel.length > 12) {
               this.addNode(decId, 'DECISION', cleanLabel);
               this.addEdge(decId, 'project_root', 'RELATED_TO');
+              messageNodes.push(decId);
             }
           }
         });
@@ -276,9 +285,17 @@ export class ContextIntelligenceEngine {
             if (cleanLabel.length > 12) {
               this.addNode(issueId, 'ISSUE', cleanLabel);
               this.addEdge(issueId, 'project_root', 'BLOCKED_BY');
+              messageNodes.push(issueId);
             }
           }
         });
+      }
+
+      // Connect all nodes created in this message to form a semantic cluster
+      for (let i = 0; i < messageNodes.length; i++) {
+        for (let j = i + 1; j < messageNodes.length; j++) {
+          this.addEdge(messageNodes[i], messageNodes[j], 'RELATED_TO');
+        }
       }
     });
 
@@ -533,7 +550,41 @@ ${handoff}`;
   // ──────────────────────────────────────────────────────────────
   const engine = new ContextIntelligenceEngine();
   engine.processConversation(context.messages);
-  const packet = engine.getStructuredPacket();
+
+  // 1. Identify current focus node (most recent TASK or ISSUE)
+  const nodesArray = Array.from(engine.nodes.entries()); // [[id, node], ...]
+  let focusNodeId = null;
+  let focusNodeLabel = '';
+  for (let i = nodesArray.length - 1; i >= 0; i--) {
+    const [id, node] = nodesArray[i];
+    if (node.type === 'TASK' || node.type === 'ISSUE') {
+      focusNodeId = id;
+      focusNodeLabel = node.label;
+      break;
+    }
+  }
+
+  // Fallback to project root if no specific focus node found
+  if (!focusNodeId) {
+    focusNodeId = 'project_root';
+    focusNodeLabel = 'General System Implementation';
+  }
+
+  // 2. Retrieve relevant subgraph (within 2 hops of focus node)
+  const subgraph = engine.getRelevantSubgraph(focusNodeId, 2);
+  const subgraphNodeIds = new Set(subgraph.nodes.map(n => n.id));
+
+  // 3. Filter deterministic lists to only include nodes present in the relevant subgraph
+  const allNodes = Array.from(engine.nodes.values());
+  const relevantNodes = allNodes.filter(n => subgraphNodeIds.has(n.id) || n.id === 'project_root');
+
+  const activeTasks = relevantNodes.filter(n => n.type === 'TASK').map(n => n.label);
+  const unresolvedIssues = relevantNodes.filter(n => n.type === 'ISSUE').map(n => n.label);
+  const importantDecisions = relevantNodes.filter(n => n.type === 'DECISION').map(n => n.label);
+  const techStack = relevantNodes.filter(n => n.type === 'TECH_STACK').map(n => n.label);
+  const userPreferences = relevantNodes.filter(n => n.type === 'PREFERENCE').map(n => n.label);
+
+  const priorityMemories = engine.priorityMemories.map(m => `[Score ${m.priority_score}/10] ${m.content}`).slice(0, 8);
 
   const sourceName = getPlatformDisplayName(context.platform);
   
@@ -546,29 +597,29 @@ ${handoff}`;
 I was working on a project with ${sourceName}. Here is where we left off:
 
 ⚙️ What I was building:
-- System Context: ${packet.system_context}
+- System Context: Deterministic State Restoration & Continuity Protocol — Version 2.0
 - Active Execution Context:
-  - Current Focus Area: ${packet.execution_context.current_focus}
-  - Core Topics Discussed: ${packet.execution_context.topics_discussed.join(', ') || 'None'}
+  - Current Focus Area: ${focusNodeLabel}
+  - Core Topics Discussed: ${techStack.join(', ') || 'None'}
   - Solved Problems & Closed Issues:
-${packet.execution_context.problems_solved.map(p => `  ✓ ${p}`).join('\n') || '  None'}
+${Array.from(engine.executionContext.solvedProblems).map(p => `  ✓ ${p}`).join('\n') || '  None'}
   - Failed Approaches to Avoid:
-${packet.execution_context.approaches_to_avoid.map(a => `  ⚠️ ${a}`).join('\n') || '  None'}
+${Array.from(engine.executionContext.failedApproaches).map(a => `  ⚠️ ${a}`).join('\n') || '  None'}
 
-🧠 Distilled priority specifications:
-${packet.priority_memory.map(m => `• ${m}`).join('\n') || 'None recorded'}
+🧠 Distilled priority memories:
+${priorityMemories.map(m => `• ${m}`).join('\n') || 'None recorded'}
 
-🔑 Key decisions made so far:
-${packet.important_decisions.map(d => `• ${d}`).join('\n') || 'None recorded'}
+🔑 Key decisions made so far (relevant to focus):
+${importantDecisions.map(d => `• ${d}`).join('\n') || 'None recorded'}
 
-❌ What I was stuck on (Unresolved Issues):
-${packet.unresolved_issues.map(i => `• ${i}`).join('\n') || 'None active'}
+❌ What I was stuck on (unresolved issues relevant to focus):
+${unresolvedIssues.map(i => `• ${i}`).join('\n') || 'None active'}
 
 ⚙️ My preferences:
-${packet.user_preferences.map(p => `• ${p}`).join('\n') || 'None configured'}
+${userPreferences.map(p => `• ${p}`).join('\n') || 'None configured'}
 
-🎯 Tasks I was working on:
-${packet.active_tasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
+🎯 Tasks I was working on (relevant to focus):
+${activeTasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
 
 🚀 Please continue from:
 ${handoffTruncated}
