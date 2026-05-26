@@ -1706,15 +1706,9 @@
             font-weight: 400;
           }
 
-          .cc-preview-body-container {
-            position: relative;
+          .cc-preview-body {
             width: 100%;
             height: 180px;
-          }
-
-          .cc-preview-body, .cc-preview-body-textarea {
-            width: 100%;
-            height: 100%;
             background: rgba(0, 0, 0, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.06);
             border-radius: 10px;
@@ -1724,41 +1718,18 @@
             color: rgba(255, 255, 255, 0.85);
             box-sizing: border-box;
             overflow-y: auto;
-          }
-
-          .cc-preview-body {
             white-space: pre-wrap;
             word-break: break-word;
           }
 
-          .cc-preview-body-textarea {
-            font-family: inherit;
-            resize: none;
-            outline: none;
-            color: #ffffff;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            background: rgba(255, 255, 255, 0.015);
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
-          }
-
-          .cc-preview-body-textarea:focus {
-            border-color: rgba(139, 92, 246, 0.55);
-            background: rgba(255, 255, 255, 0.03);
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 14px rgba(139, 92, 246, 0.2);
-          }
-
-          .hidden {
-            display: none !important;
-          }
-
-          .cc-preview-body::-webkit-scrollbar, .cc-preview-body-textarea::-webkit-scrollbar {
+          .cc-preview-body::-webkit-scrollbar {
             width: 4px;
           }
-          .cc-preview-body::-webkit-scrollbar-thumb, .cc-preview-body-textarea::-webkit-scrollbar-thumb {
+          .cc-preview-body::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 4px;
           }
-          .cc-preview-body::-webkit-scrollbar-thumb:hover, .cc-preview-body-textarea::-webkit-scrollbar-thumb:hover {
+          .cc-preview-body::-webkit-scrollbar-thumb:hover {
             background: rgba(255, 255, 255, 0.2);
           }
 
@@ -1771,40 +1742,36 @@
 
           .cc-preview-btn {
             font-family: inherit;
-            font-size: 12px;
+            font-size: 11.5px;
             font-weight: 600;
-            padding: 8px 18px;
-            border-radius: 8px;
+            padding: 8px 16px;
+            height: 34px;
+            border-radius: 20px; /* Modern Premium Pill Shape */
             border: 1px solid transparent;
             cursor: pointer;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: 6px;
+            letter-spacing: 0.1px;
+            box-sizing: border-box;
+            outline: none;
           }
 
           .cc-preview-btn.cancel {
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(255, 255, 255, 0.02);
             color: rgba(255, 255, 255, 0.6);
             border-color: rgba(255, 255, 255, 0.08);
           }
           .cc-preview-btn.cancel:hover {
-            background: rgba(255, 255, 255, 0.08);
-            color: #ffffff;
-            border-color: rgba(255, 255, 255, 0.15);
+            background: rgba(239, 68, 68, 0.05); /* Crimson alert background hover */
+            color: #ef4444; /* Crimson text */
+            border-color: rgba(239, 68, 68, 0.25);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
           }
-
-          .cc-preview-btn.edit {
-            background: rgba(139, 92, 246, 0.06);
-            color: #a78bfa;
-            border-color: rgba(139, 92, 246, 0.2);
-          }
-          .cc-preview-btn.edit:hover {
-            background: rgba(139, 92, 246, 0.12);
-            color: #c4b5fd;
-            border-color: rgba(139, 92, 246, 0.35);
-            box-shadow: 0 0 10px rgba(139, 92, 246, 0.1);
+          .cc-preview-btn.cancel:active {
+            transform: scale(0.97);
           }
 
           .cc-preview-btn.send {
@@ -1812,14 +1779,28 @@
             color: #ffffff;
             border: 1px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 4px 15px rgba(124, 58, 237, 0.35);
+            position: relative;
+            overflow: hidden;
+          }
+          /* Premium Shimmer sweep hover effect */
+          .cc-preview-btn.send::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+            transform: translateX(-100%);
+            transition: transform 0.6s ease;
           }
           .cc-preview-btn.send:hover {
-            box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5), 0 0 12px rgba(219, 39, 119, 0.2);
+            box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5), 0 0 12px rgba(219, 39, 119, 0.25);
             transform: translateY(-1px);
             border-color: rgba(255, 255, 255, 0.3);
           }
+          .cc-preview-btn.send:hover::after {
+            transform: translateX(100%);
+          }
           .cc-preview-btn.send:active {
-            transform: translateY(0);
+            transform: translateY(0) scale(0.97);
           }
         </style>
 
@@ -1833,30 +1814,26 @@
               <div class="cc-preview-subtitle">Review prompt before sending</div>
             </div>
           </div>
-          <div class="cc-preview-body-container">
-            <div class="cc-preview-body" id="cc-preview-body-text">${previewText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            <textarea class="cc-preview-body-textarea hidden" id="cc-preview-body-edit"></textarea>
-          </div>
+          <div class="cc-preview-body" id="cc-preview-body-text">${previewText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
           <div class="cc-preview-actions">
-            <button class="cc-preview-btn cancel" id="cc-preview-cancel">Cancel</button>
-            <button class="cc-preview-btn edit" id="cc-preview-edit-btn">
+            <button class="cc-preview-btn cancel" id="cc-preview-cancel">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
               </svg>
-              <span>Edit</span>
+              <span>Cancel</span>
             </button>
-            <button class="cc-preview-btn send" id="cc-preview-send">Send ↵</button>
+            <button class="cc-preview-btn send" id="cc-preview-send">
+              <span>Send</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-left: 2px;">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
           </div>
         </div>
       `;
 
-      let isEditing = false;
-      let currentPromptValue = prompt;
-
-      const textEl = shadow.getElementById('cc-preview-body-text');
-      const editEl = shadow.getElementById('cc-preview-body-edit');
-      const editBtn = shadow.getElementById('cc-preview-edit-btn');
       const sendBtn = shadow.getElementById('cc-preview-send');
       const cancelBtn = shadow.getElementById('cc-preview-cancel');
 
@@ -1865,103 +1842,33 @@
         resolve(resultValue);
       };
 
-      const handleSend = () => {
-        if (isEditing) {
-          currentPromptValue = editEl.value;
-        }
-        cleanup(currentPromptValue);
+      const wrappedCleanup = (resultValue) => {
+        document.removeEventListener('keydown', keyHandler);
+        clearTimeout(timeoutId);
+        cleanup(resultValue);
       };
 
-      const handleCancel = () => {
-        cleanup(false);
-      };
+      sendBtn.addEventListener('click', () => wrappedCleanup(true));
+      cancelBtn.addEventListener('click', () => wrappedCleanup(false));
 
-      editBtn.addEventListener('click', () => {
-        if (!isEditing) {
-          // Switch to Edit Mode
-          textEl.classList.add('hidden');
-          editEl.classList.remove('hidden');
-          editEl.value = currentPromptValue;
-          editEl.focus();
-          
-          editBtn.innerHTML = `
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-            <span>Done</span>
-          `;
-          isEditing = true;
-        } else {
-          // Save and switch to Preview Mode
-          currentPromptValue = editEl.value;
-          
-          const newPreviewText = currentPromptValue.length > 400
-            ? currentPromptValue.substring(0, 400) + '…'
-            : currentPromptValue;
-          textEl.textContent = newPreviewText;
-          
-          editEl.classList.add('hidden');
-          textEl.classList.remove('hidden');
-          
-          editBtn.innerHTML = `
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-            <span>Edit</span>
-          `;
-          isEditing = false;
-        }
-      });
-
-      sendBtn.addEventListener('click', handleSend);
-      cancelBtn.addEventListener('click', handleCancel);
-
-      // Keyboard: Enter to send (if not editing, or if Ctrl+Enter in editing), Escape to cancel
+      // Keyboard: Enter to send, Escape to cancel
       const keyHandler = (e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
-          handleCancel();
+          wrappedCleanup(false);
         } else if (e.key === 'Enter') {
-          if (!isEditing) {
-            e.preventDefault();
-            handleSend();
-          } else if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            handleSend();
-          }
+          e.preventDefault();
+          wrappedCleanup(true);
         }
       };
       document.addEventListener('keydown', keyHandler);
 
-      // Clean up key listener and timeout when host is removed
-      const origCleanup = cleanup;
-      const wrappedCleanup = (resultValue) => {
-        document.removeEventListener('keydown', keyHandler);
-        clearTimeout(timeoutId);
-        origCleanup(resultValue);
-      };
-
-      // Auto-timeout after 60 seconds (auto-send original or modified prompt)
+      // Auto-timeout after 60 seconds (auto-send)
       const timeoutId = setTimeout(() => {
         if (document.getElementById('__cc-preview-host')) {
-          if (isEditing) {
-            currentPromptValue = editEl.value;
-          }
-          wrappedCleanup(currentPromptValue);
+          wrappedCleanup(true);
         }
       }, 60000);
-
-      // Re-bind click listeners with wrappedCleanup
-      sendBtn.removeEventListener('click', handleSend);
-      cancelBtn.removeEventListener('click', handleCancel);
-      
-      // Override handlers to use wrappedCleanup and capture latest edits
-      sendBtn.onclick = () => {
-        if (isEditing) currentPromptValue = editEl.value;
-        wrappedCleanup(currentPromptValue);
-      };
-      cancelBtn.onclick = () => wrappedCleanup(false);
     });
   }
 
@@ -1973,11 +1880,8 @@
       );
       if (!el) return { success: false, error: 'Claude input not found' };
       insertTextProgrammatically(el, prompt);
-      const finalPrompt = await showPreviewConfirmation(prompt);
-      if (!finalPrompt) return { success: false, error: 'Injection cancelled by user' };
-      if (finalPrompt !== prompt) {
-        insertTextProgrammatically(el, finalPrompt);
-      }
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, 'button[aria-label*="Send"], button[data-testid*="send"], button[aria-label="Send Message"], button[class*="send"]');
       return { success: true };
@@ -1989,11 +1893,8 @@
       );
       if (!el) return { success: false, error: 'ChatGPT input not found' };
       insertTextProgrammatically(el, prompt);
-      const finalPrompt = await showPreviewConfirmation(prompt);
-      if (!finalPrompt) return { success: false, error: 'Injection cancelled by user' };
-      if (finalPrompt !== prompt) {
-        insertTextProgrammatically(el, finalPrompt);
-      }
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, '[data-testid="send-button"], button[aria-label="Send message"], button[aria-label="Send prompt"], button[data-testid*="send"], button[class*="send"]');
       return { success: true };
@@ -2005,11 +1906,8 @@
       );
       if (!el) return { success: false, error: 'Gemini input not found' };
       insertTextProgrammatically(el, prompt);
-      const finalPrompt = await showPreviewConfirmation(prompt);
-      if (!finalPrompt) return { success: false, error: 'Injection cancelled by user' };
-      if (finalPrompt !== prompt) {
-        insertTextProgrammatically(el, finalPrompt);
-      }
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, 'button.send-button, button[aria-label*="Send"], button[mattooltip*="Send"], button[class*="send"]');
       return { success: true };
@@ -2021,11 +1919,8 @@
       );
       if (!el) return { success: false, error: 'Grok input not found' };
       insertTextProgrammatically(el, prompt);
-      const finalPrompt = await showPreviewConfirmation(prompt);
-      if (!finalPrompt) return { success: false, error: 'Injection cancelled by user' };
-      if (finalPrompt !== prompt) {
-        insertTextProgrammatically(el, finalPrompt);
-      }
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, 'button[aria-label*="Send"], button[type="submit"], button[data-testid*="send"], button[class*="send"]');
       return { success: true };
@@ -2037,11 +1932,8 @@
       );
       if (!el) return { success: false, error: 'Perplexity input not found' };
       insertTextProgrammatically(el, prompt);
-      const finalPrompt = await showPreviewConfirmation(prompt);
-      if (!finalPrompt) return { success: false, error: 'Injection cancelled by user' };
-      if (finalPrompt !== prompt) {
-        insertTextProgrammatically(el, finalPrompt);
-      }
+      const confirmed = await showPreviewConfirmation(prompt);
+      if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, 'button[aria-label*="Submit"], button[type="submit"], button[class*="send"]');
       return { success: true };
