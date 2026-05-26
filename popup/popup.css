@@ -556,6 +556,91 @@ body {
   overflow: hidden;
 }
 
+.drag-instruction-banner {
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(24, 24, 27, 0.75) 0%, rgba(9, 9, 11, 0.9) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Premium Gradient left-accent border */
+.drag-instruction-banner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(to bottom, #8b5cf6, #06b6d4);
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  z-index: 1;
+}
+
+/* Subtle glowing aura behind the icon */
+.drag-instruction-banner::after {
+  content: '';
+  position: absolute;
+  top: -15px;
+  left: -15px;
+  width: 50px;
+  height: 50px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.18) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.drag-instruction-banner:hover {
+  background: linear-gradient(135deg, rgba(27, 27, 31, 0.8) 0%, rgba(12, 12, 15, 0.95) 100%);
+  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 6px 24px rgba(139, 92, 246, 0.08), 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transform: translateY(-0.5px);
+}
+
+.drag-instruction-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 2;
+  animation: drag-icon-float 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.25));
+}
+
+.drag-instruction-text {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  z-index: 2;
+  font-weight: 400;
+  letter-spacing: 0.1px;
+}
+
+/* Gorgeous high-fidelity gradient header */
+.drag-instruction-text strong {
+  background: linear-gradient(135deg, #a78bfa 0%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  margin-right: 4px;
+}
+
+@keyframes drag-icon-float {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-2px) rotate(3deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
 .section-header {
   display: flex;
   align-items: center;

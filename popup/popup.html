@@ -90,6 +90,31 @@
       <span id="context-count" class="context-count-badge">0</span>
     </div>
 
+    <!-- Drag & Drop Instruction Hint Banner -->
+    <div class="drag-instruction-banner hidden" id="drag-instruction-banner">
+      <div class="drag-instruction-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="glow-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#a78bfa" />
+              <stop offset="100%" stop-color="#22d3ee" />
+            </linearGradient>
+          </defs>
+          <!-- Card outline (top left) -->
+          <rect x="3" y="3" width="7" height="9" rx="1.5" stroke="url(#glow-grad)" stroke-width="1.5" opacity="0.6"/>
+          <!-- Dotted path representing dragging -->
+          <path d="M6 12C6 15.5 9 18 14 16.5" stroke="url(#glow-grad)" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="2.5 2.5"/>
+          <!-- Arrow head at the end -->
+          <path d="M12 14.5L15 16.5L12 18.5" stroke="url(#glow-grad)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- Target drop indicator (bottom right) -->
+          <circle cx="17" cy="15" r="3.5" stroke="url(#glow-grad)" stroke-width="1.5" fill="rgba(34, 211, 238, 0.08)" stroke-dasharray="1.5 1.5"/>
+        </svg>
+      </div>
+      <span class="drag-instruction-text">
+        <strong>Gesture Handoff:</strong> Drag & drop any saved context card directly into your active AI chat window to instantly share context and continue!
+      </span>
+    </div>
+
     <!-- Live Search & Filter Chips -->
     <div class="search-filter-container">
       <div class="search-box">

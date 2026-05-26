@@ -91,6 +91,7 @@ const contextsList        = $('contexts-list');
 const emptyState          = $('empty-state');
 const contextCountBadge   = $('context-count');
 const toast               = $('toast');
+const dragInstructionBanner = $('drag-instruction-banner');
 
 const previewModal        = $('preview-modal');
 const previewClose        = $('preview-close');
@@ -294,6 +295,14 @@ async function loadContexts() {
 function renderContexts() {
   contextCountBadge.textContent = savedContexts.length;
 
+  if (dragInstructionBanner) {
+    if (savedContexts.length > 0) {
+      dragInstructionBanner.classList.remove('hidden');
+    } else {
+      dragInstructionBanner.classList.add('hidden');
+    }
+  }
+
   let filtered = savedContexts;
   if (currentFilterPlatform !== 'all') {
     filtered = filtered.filter(ctx => ctx.platform === currentFilterPlatform);
@@ -345,6 +354,7 @@ function createContextCard(ctx) {
   
   if (ctx.aiStatus !== 'pending') {
     card.setAttribute('draggable', 'true');
+    card.setAttribute('title', 'Drag and drop this conversation into an active AI chat page to continue or share context');
   }
 
   let aiBadgeHtml = '';
