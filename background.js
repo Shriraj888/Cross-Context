@@ -589,7 +589,7 @@ async function runGeminiEnhancement(contextId) {
     const context = contexts[contextIndex];
 
     const apiKey = geminiApiKey;
-    const model = geminiModel || 'gemini-2.0-flash';
+    const model = geminiModel || 'gemini-3.5-flash';
 
     if (!apiKey) {
       throw new Error('Missing Gemini API Key');
