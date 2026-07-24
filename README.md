@@ -59,13 +59,21 @@ The long-term goal of Cross Context is to establish a **universal context layer*
 ## ⚡ Key Features
 
 * **Cross-LLM Context Transfer**: Move conversations dynamically between Claude, ChatGPT, Gemini, Grok, and Perplexity.
-* **Intelligent Scraping Engine**: DOM parsing scripts custom-tailored for each LLM interface. They clean out UI chrome, copy buttons, and toolbars before processing.
+* **File-Based Context Injection (`context.md`)**: Generates an in-memory Markdown file (e.g. `context-con_01.md`) and uses the HTML5 `DataTransfer` API and file drop simulation to attach context directly into target LLM file uploaders, with graceful fallback to plain text pasting.
+* **Upload Readiness Polling (`waitForFileUploadComplete`)**: Actively monitors host platform DOM attachment chips (`[data-testid="file-chip"]`, `uploader-file-chip`, etc.) to verify file attachments finish uploading before typing companion text or submitting.
+* **Sequential Context ID System (`con_01`, `con_02`...)**: Generates human-friendly sequential Context IDs for clear context tracking, file naming, and multi-session management.
+* **Multi-Session AI System Instructions**: Embeds explicit system instructions (`> ⚠️ SYSTEM INSTRUCTION FOR RECEIVING AI MODEL...`) and prompt companion text (`(Context ID: con_01)`) to prevent target LLMs from confusing or merging memory states across different context files.
+* **Multi-Context Session Merger**: Allows selecting multiple saved contexts (`con_01` + `con_02`) and synthesizing them into a new unified context session (`con_03`) combining transcripts, memory graphs, tech stacks, and architectural decisions.
+* **Estimated Token Counter & Model Fit Badge**: Calculates real-time estimated tokens (`Math.ceil(length / 4)`) and renders color-coded compatibility badges (`⚡ ~2.4k tokens`) inside the `context.md Preview` card.
+* **`context.md Preview` Modal Component**: Dedicated preview tab in the Chrome extension popup displaying a file header card, Context ID badge, Copy Markdown button, Download `.md` button, and dark code viewer.
+* **Visual Attachment Mode Badges**: Renders prominent glowing badges (`📄 Attached context-con_01.md` vs `📝 Text Paste Fallback`) in the floating preview overlay on target pages.
+* **Intelligent & Zero-Thrashing Scraping Engine**: DOM parsing scripts custom-tailored for each LLM interface. Employs `WeakMap` text caching and temporary CSS rule injection (`.cc-scraping-active`) to clean out UI chrome, copy buttons, and toolbars before processing without layout thrashing.
 * **Smart Context Extraction**: Recovers hierarchical markdown structures from raw HTML, preserving code blocks, tables, lists, and headers.
 * **AI-Enhanced Summarization**: Optional integration with Gemini's API to distill long transcripts into dense, high-level developer specifications.
 * **Deterministic Context Scoring**: Local heuristic algorithm that rates messages based on information density (errors, requirements, decisions, code vs fluff).
 * **Concept Deduplication**: Algorithmic deduplication using Jaccard similarity metrics to prevent repeating code blocks or redundant instructions.
 * **Memory-Graph Generation**: Builds a local relationship network (nodes and edges) tracking tasks, tech stack, decisions, and bugs.
-* **One-Click Handoff & Injection**: Automated workflow that opens the target platform, waits for DOM readiness, and programmatically injects the structured state.
+* **One-Click Handoff & Injection**: Automated workflow that opens the target platform, waits for DOM readiness, and programmatically injects the structured state file and companion text.
 * **Dynamic Scroll-to-Load**: Heuristic viewport controller that scroll-loads virtualized lists in long chat logs to capture full conversation history.
 * **Base64 Media Extraction**: Detects, fetches, bypasses CORS, compresses, and base64-encodes SVGs and images within the conversation to preserve visual context.
 
@@ -195,10 +203,10 @@ graph TD
 5. **Markdown Reconstruction**: The HTML nodes are translated into clean Markdown, preserving tables, code blocks, lists, and formatting.
 6. **Media Optimization**: SVG assets are rendered to Canvas and compiled into PNG data URIs. Inline image URLs are retrieved via the background proxy, optimized to 1024px JPEG, and converted to base64.
 7. **Graph Generation & Deduplication**: The context intelligence engine builds a local memory graph and runs Jaccard similarity metrics to strip repeating code or text.
-8. **Handoff Packaging**: A JSON transfer packet containing context metadata, messages, priorities, and code snippets is saved to local storage.
+8. **Handoff Packaging & ID Assignment**: A context snapshot is created and assigned a sequential Context ID (e.g. `con_01`). A complete, structured Markdown file (`context-con_01.md`) containing metadata, AI system instructions, project briefing, and full conversation transcript is saved to local storage.
 9. **Target Launch**: The background script opens a tab loading the user-chosen target LLM.
-10. **Target Injection**: Upon tab load completion, the injection engine locates the editor, simulates a focus event, overrides the native input setter (to bypass framework virtual DOM virtual-state checks), and enters the formatted handoff prompt.
-11. **Session Restored**: The page submits the prompt, and the new LLM resumes the task without breaking pair-programming context.
+10. **Target Injection & File Attachment**: Upon tab load completion, the injection engine locates the uploader, creates an in-memory `File` (`context-con_01.md`), and attaches it via the `DataTransfer` API and drag-and-drop simulation. It then types a companion instruction in the text input box referencing `(Context ID: con_01)`.
+11. **Session Restored**: The target LLM reads the attached `context-con_01.md` file, processes the embedded Context ID and briefing, and resumes the task without breaking pair-programming context.
 
 ---
 
@@ -314,9 +322,19 @@ For interfaces nested inside Shadow Roots, the scraper uses a recursive traversa
 
 ## 💉 Injection Engine Details
 
-Inserting context into modern Single Page Applications (SPAs) built with React or Svelte cannot be done by simply setting `input.value = text`. The frameworks maintain internal state machines that will overwrite the input field when the user types or clicks submit.
+Cross Context supports **Dual-Mode Context Injection**: File Attachment Mode (`context.md`) and Fallback Text Mode.
 
-To solve this, the injection script performs the following operations:
+### 1. File Attachment Mode (`attachMarkdownFile`)
+Rather than pasting huge blocks of text directly into input fields, Cross Context creates an in-memory `File` object (`context-con_01.md`) and attaches it directly to the target platform's file uploader:
+- **DataTransfer API & File Inputs**: Finds file inputs (`input[type="file"]`) or drop targets and populates `files` via `DataTransfer`.
+- **Drag & Drop Simulation**: Dispatches synthetic `dragenter`, `dragover`, and `drop` events with custom `DataTransfer` payloads for canvas/dropzone areas.
+- **Upload Readiness Polling (`waitForFileUploadComplete`)**: Actively polls for platform DOM attachment chips (e.g. `[data-testid="file-chip"]`, `uploader-file-chip`) to ensure the host platform completes file processing before typing text or submitting.
+- **Visual Mode Overlay Badge**: Displays glowing visual mode badges (`📄 Attached context-con_01.md` vs `📝 Text Paste Fallback`) in the floating preview overlay on target pages.
+- **Companion Prompt Injection**: Once the file is attached and verified, the injector programmatically types a companion prompt into the text editor referencing the Context ID:
+  > *"Please read the attached context-con_01.md (Context ID: con_01) and continue from where we left off..."*
+
+### 2. Fallback Text Mode & SPA State Overrides
+If file attachment is not supported or rejected, the injection script falls back to text insertion:
 1. **Selection & Focus**: It focuses and dispatches a mouse click to the input element.
 2. **Text Simulation**: It attempts insertion using `document.execCommand('insertText', false, text)`. This fires standard React text-listener states naturally.
 3. **Native Setters Callback**: If `execCommand` fails or the element is not updated, the injector grabs the native input or textarea property setter from the window prototype chain:
@@ -325,7 +343,7 @@ To solve this, the injection script performs the following operations:
    setter.call(input, text);
    ```
 4. **Event Dispatching**: The injector dispatches synthetic `input` and `change` events with bubble propagation enabled to force the virtual DOM state to sync.
-5. **Execution Simulation**: It waits 1200ms for state reconciliation, locates the submit button, verifies it is not disabled, and clicks it. If the button is not present, it dispatches an `Enter` keyboard event to submit the context.
+5. **Execution Simulation**: It displays a floating preview confirmation overlay, waits 1200ms for state reconciliation, locates the submit button, and submits the prompt.
 
 ---
 

@@ -73,6 +73,7 @@ function getPlatformIcon(platformKey, size = 16) {
 // State
 // ──────────────────────────────────────────
 let savedContexts = [];
+let selectedContextIds = new Set();
 let currentTabPlatform = null;
 let draggedContextId = null;
 let dragToPageHintTimer = null;
@@ -142,7 +143,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.location.protocol === 'file:' && savedContexts.length === 0) {
     savedContexts = [
       {
-        id: 'mock_claude',
+        id: 'con_01',
         platform: 'claude',
         title: 'Building a Rust web server with Actix-web and SQLx',
         messages: [
@@ -184,7 +185,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       },
       {
-        id: 'mock_chatgpt',
+        id: 'con_02',
         platform: 'chatgpt',
         title: 'Writing a custom React hook for debouncing fetch requests',
         messages: [
@@ -295,6 +296,19 @@ async function loadContexts() {
 function renderContexts() {
   contextCountBadge.textContent = savedContexts.length;
 
+  const btnMergeContexts = $('btn-merge-contexts');
+  if (btnMergeContexts) {
+    const count = selectedContextIds.size;
+    if (savedContexts.length >= 2) {
+      btnMergeContexts.style.display = 'inline-flex';
+      const labelSpan = btnMergeContexts.querySelector('span');
+      if (labelSpan) labelSpan.textContent = `Merge (${count})`;
+      btnMergeContexts.style.opacity = count >= 2 ? '1' : '0.6';
+    } else {
+      btnMergeContexts.style.display = 'none';
+    }
+  }
+
   if (dragInstructionBanner) {
     if (savedContexts.length > 0) {
       dragInstructionBanner.classList.remove('hidden');
@@ -387,7 +401,7 @@ function createContextCard(ctx) {
       <svg class="ai-badge-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="12" y1="8" x2="12" y2="12"></line>
-        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        <line x1="12" y1="16" x2="12.01" y2="17"/>
       </svg>
     </span>`;
   }
@@ -402,6 +416,9 @@ function createContextCard(ctx) {
       </svg>
     </span>`;
   }
+
+  const isSelected = selectedContextIds.has(ctx.id);
+  const selectBoxHtml = `<div class="context-card-checkbox ${isSelected ? 'selected' : ''}" data-action="toggle-select" data-id="${ctx.id}" title="${isSelected ? 'Deselect for merge' : 'Select to merge with another context'}">${isSelected ? '✓' : ''}</div>`;
 
   // Filter platforms to other platforms for quick handoff targets
   const targets = Object.keys(PLATFORMS).filter(p => p !== ctx.platform);
@@ -418,6 +435,7 @@ function createContextCard(ctx) {
   card.innerHTML = `
     <div class="card-main">
       <div class="card-left">
+        ${selectBoxHtml}
         <span class="card-platform-icon">
           ${getPlatformIcon(ctx.platform, 18)}
         </span>
@@ -648,7 +666,14 @@ function bindEvents() {
     if (!actionEl) return;
     const { action, id } = actionEl.dataset;
     
-    if (action === 'preview') {
+    if (action === 'toggle-select') {
+      if (selectedContextIds.has(id)) {
+        selectedContextIds.delete(id);
+      } else {
+        selectedContextIds.add(id);
+      }
+      renderContexts();
+    } else if (action === 'preview') {
       openPreviewModal(id);
     } else if (action === 'delete') {
       handleDeleteContext(id);
@@ -659,6 +684,29 @@ function bindEvents() {
       handleQuickInject(id, target);
     }
   });
+
+  const btnMergeContexts = $('btn-merge-contexts');
+  if (btnMergeContexts) {
+    btnMergeContexts.addEventListener('click', async () => {
+      const ids = Array.from(selectedContextIds);
+      if (ids.length < 2) {
+        showToast('Select at least 2 contexts to merge', 'error');
+        return;
+      }
+      showToast('⚡ Merging selected contexts…', 'info');
+      const response = await sendMessage({
+        type: 'MERGE_CONTEXTS',
+        payload: { contextIds: ids }
+      });
+      if (response?.success) {
+        selectedContextIds.clear();
+        await loadContexts();
+        showToast(`✓ Merged into ${response.mergedContext?.id || 'new context'}!`, 'success');
+      } else {
+        showToast(response?.error || 'Merge failed', 'error');
+      }
+    });
+  }
 
   // Live Search Input Handler
   searchInput.addEventListener('input', () => {
@@ -1306,58 +1354,102 @@ function renderPreviewContent(ctx) {
     }
   }
 
-  // Render raw transcript layout
-  ctx.messages.forEach(msg => {
-    const isUser = msg.role === 'user';
-    let headerHtml = '';
-    let extraClass = '';
+  // Render context.md Preview layout
+  const mdContent = formatContextPrompt(ctx, ctx.platform);
+  const fileName = ctx.id ? `context-${ctx.id}.md` : 'context.md';
+  const truncatedId = ctx.id ? (ctx.id.length > 18 ? ctx.id.substring(0, 8) + '…' + ctx.id.slice(-6) : ctx.id) : '';
 
-    if (isUser) {
-      const userIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="user-svg" style="display:inline-block; vertical-align:middle; margin-right:4px;">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-        <circle cx="12" cy="7" r="4"></circle>
-      </svg>`;
-      headerHtml = `${userIcon}<span>User</span>`;
-    } else {
-      const platformKey = ctx.platform;
-      const platformCfg = PLATFORMS[platformKey] || { name: 'Assistant' };
-      const iconSvg = getPlatformIcon(platformKey, 12);
-      headerHtml = `${iconSvg}<span>${platformCfg.name}</span>`;
-      extraClass = `platform-${platformKey}`;
-    }
+  const tokenEstimate = Math.ceil(mdContent.length / 4);
+  let tokenBadgeClass = 'optimal';
+  let tokenBadgeTooltip = `⚡ ~${tokenEstimate.toLocaleString()} tokens (Fits all LLM models)`;
+  if (tokenEstimate > 25000) {
+    tokenBadgeClass = 'large';
+    tokenBadgeTooltip = `⚠️ ~${tokenEstimate.toLocaleString()} tokens (Recommended for Claude/Gemini)`;
+  } else if (tokenEstimate > 10000) {
+    tokenBadgeClass = 'medium';
+    tokenBadgeTooltip = `⚡ ~${tokenEstimate.toLocaleString()} tokens`;
+  }
 
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `preview-message role-${msg.role} ${extraClass}`.trim();
-    
-    let msgImagesHtml = '';
-    if (msg.images && msg.images.length > 0) {
-      msgImagesHtml = `
-        <div class="ai-image-gallery" style="margin-top: 8px;">
-          ${msg.images.map(imgSrc => `
-            <div class="ai-image-thumbnail">
-              <img src="${escapeHtml(imgSrc)}" alt="Scraped conversation diagram" />
-            </div>
-          `).join('')}
+  const mdPreviewDiv = document.createElement('div');
+  mdPreviewDiv.className = 'context-md-view';
+
+  mdPreviewDiv.innerHTML = `
+    <div class="context-md-header-card">
+      <div class="context-md-title-row">
+        <div class="context-md-file-badge">
+          <svg class="file-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+          <span class="file-name" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</span>
         </div>
-      `;
-    }
+        ${ctx.id ? `
+        <div class="context-md-id-badge" title="Context ID: ${escapeHtml(ctx.id)}">
+          <span class="id-label">ID:</span>
+          <span>${escapeHtml(truncatedId)}</span>
+        </div>` : ''}
+      </div>
 
-    msgDiv.innerHTML = `
-      <div class="preview-message-header">${headerHtml}</div>
-      <div class="preview-message-body">${escapeHtml(msg.content)}</div>
-      ${msgImagesHtml}
-    `;
-    previewContent.appendChild(msgDiv);
+      <div class="context-md-actions-row">
+        <button id="btn-copy-md" class="context-md-action-btn primary">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <span>Copy Markdown</span>
+        </button>
 
-    // Attach full-screen thumbnail zoom inside raw transcript too
-    const msgThumbs = msgDiv.querySelectorAll('.ai-image-thumbnail img');
-    msgThumbs.forEach(thumb => {
-      thumb.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openFullscreenImage(thumb.src);
-      });
+        <button id="btn-download-md" class="context-md-action-btn secondary">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Download .md</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="context-md-code-box">
+      <div class="context-md-code-header">
+        <span>MARKDOWN FILE CONTENT</span>
+        <div class="header-stats">
+          <span class="char-count">${mdContent.length.toLocaleString()} chars</span>
+          <span class="token-badge ${tokenBadgeClass}" title="${escapeHtml(tokenBadgeTooltip)}">⚡ ~${tokenEstimate.toLocaleString()} tokens</span>
+        </div>
+      </div>
+      <pre class="context-md-pre"><code>${escapeHtml(mdContent)}</code></pre>
+    </div>
+  `;
+
+  previewContent.appendChild(mdPreviewDiv);
+
+  // Bind copy and download actions
+  const copyMdBtn = mdPreviewDiv.querySelector('#btn-copy-md');
+  if (copyMdBtn) {
+    copyMdBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(mdContent);
+      showToast('✓ Markdown copied to clipboard!', 'success');
     });
-  });
+  }
+
+  const downloadMdBtn = mdPreviewDiv.querySelector('#btn-download-md');
+  if (downloadMdBtn) {
+    downloadMdBtn.addEventListener('click', () => {
+      const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`✓ Downloaded ${fileName}`, 'success');
+    });
+  }
 
   // Render Memory Graph layout
   renderMemoryGraph(ctx);

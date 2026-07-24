@@ -341,7 +341,16 @@ export function formatContextPrompt(context, targetPlatform) {
 
 function _buildPrompt(context, targetPlatform) {
   if (context.aiEnhanced && context.aiStatus === 'success') {
-    const src = getPlatformDisplayName(context.platform);
+    const idVal = context.id || 'con_01';
+    const idTag = `# 📄 Cross-Context Knowledge Transfer — Context ID: \`${idVal}\`
+
+> ⚠️ **SYSTEM INSTRUCTION FOR RECEIVING AI MODEL**:
+> This file contains an exported context snapshot identified by **Context ID: \`${idVal}\`**.
+> Use this **Context ID (\`${idVal}\`)** to uniquely identify, track, and differentiate this project history and state from any other context files (e.g. \`con_01\`, \`con_02\`, \`con_03\`). Do not mix up memory states across different Context IDs.
+
+---
+
+`;
     const e = context.aiEnhanced;
     const summary = e.project_summary || '';
     const task = e.current_task || '';
@@ -362,6 +371,14 @@ function _buildPrompt(context, targetPlatform) {
       return arr.map((code, i) => `--- Snippet #${i + 1} ---\n${code}`).join('\n\n');
     };
 
+    // Helper for transcript rendering
+    const transcriptSection = Array.isArray(context.messages) && context.messages.length > 0
+      ? `\n\n---\n\n## 💬 Full Conversation Transcript\n\n` + context.messages.map(m => {
+          const roleHeader = m.role === 'user' ? '### 👤 User' : `### 🤖 ${src}`;
+          return `${roleHeader}\n${m.content}`;
+        }).join('\n\n')
+      : '';
+
     // Detect Dominant Intent
     const types = Array.isArray(e.conversation_type) ? e.conversation_type.map(t => t.toLowerCase()) : [];
     let dominantIntent = 'general';
@@ -381,7 +398,7 @@ function _buildPrompt(context, targetPlatform) {
 
     if (dominantIntent === 'coding') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Coding Briefing]
-I was working on a coding project with ${src}. Here is where we left off:
+${idTag}I was working on a coding project with ${src}. Here is where we left off:
 
 📁 What I was building:
 - Project Summary: ${summary}
@@ -405,12 +422,12 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     if (dominantIntent === 'debugging') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Debugging Briefing]
-I was working on debugging an issue with ${src}. Here is where we left off:
+${idTag}I was working on debugging an issue with ${src}. Here is where we left off:
 
 📁 What I was building & testing:
 - Project Summary: ${summary}
@@ -433,12 +450,12 @@ ${bulletJoin(e.failed_attempts)}
 ${bulletJoin(e.successful_solutions)}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     if (dominantIntent === 'brainstorming') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Brainstorming Briefing]
-I was brainstorming and planning with ${src}. Here is where we left off:
+${idTag}I was brainstorming and planning with ${src}. Here is where we left off:
 
 📁 What I was building/planning:
 - Core Topic/Overview: ${summary}
@@ -464,12 +481,12 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     if (dominantIntent === 'research') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Research Briefing]
-I was researching and studying with ${src}. Here is where we left off:
+${idTag}I was researching and studying with ${src}. Here is where we left off:
 
 📁 What I was researching:
 - Research Focus: ${summary}
@@ -492,12 +509,12 @@ ${bulletJoin(e.user_preferences)}
 - Knowledge Goal: ${intent}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     if (dominantIntent === 'writing') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Writing Briefing]
-I was drafting and composing text with ${src}. Here is where we left off:
+${idTag}I was drafting and composing text with ${src}. Here is where we left off:
 
 📁 What I was writing:
 - Narrative/Content Overview: ${summary}
@@ -517,12 +534,12 @@ ${bulletJoin(e.user_preferences)}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     // General fallback
     return `[🔄 AI-Enhanced Cross Context Transfer — Briefing]
-I was working on a project with ${src}. Here is where we left off:
+${idTag}I was working on a project with ${src}. Here is where we left off:
 
 📁 What I was building:
 - Project Summary: ${summary}
@@ -542,7 +559,7 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
   }
 
   // ──────────────────────────────────────────────────────────────
@@ -592,9 +609,10 @@ ${handoff}`;
   const firstUser = context.messages.find(m => m.role === 'user');
   const handoffHint = firstUser ? firstUser.content : 'Continue active working session';
   const handoffTruncated = handoffHint.length > 300 ? handoffHint.substring(0, 300) + '...' : handoffHint;
+  const idTag = context.id ? `[Context ID: ${context.id}]\n` : '';
 
   return `[🔄 Cross Context Transfer — State Restoration Briefing]
-I was working on a project with ${sourceName}. Here is where we left off:
+${idTag}I was working on a project with ${sourceName}. Here is where we left off:
 
 ⚙️ What I was building:
 - System Context: Deterministic State Restoration & Continuity Protocol — Version 2.0

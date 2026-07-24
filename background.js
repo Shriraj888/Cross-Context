@@ -19,6 +19,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     GET_CONTEXTS:     () => handleGetContexts(sendResponse),
     DELETE_CONTEXT:   () => handleDeleteContext(message.id, sendResponse),
     CLEAR_CONTEXTS:   () => handleClearContexts(sendResponse),
+    MERGE_CONTEXTS:   () => handleMergeContexts(message.payload, sendResponse),
     INJECT_CONTEXT:   () => handleInjectContext(message.payload, sendResponse),
     SCRAPE_REQUEST:   () => handleScrapeRequest(message, sendResponse),
     FETCH_IMAGE_BASE64: () => handleFetchImageBase64(message.url, sendResponse),
@@ -54,7 +55,7 @@ async function handleSaveContext(context, sendResponse) {
     };
 
     const newContext = {
-      id: generateId(),
+      id: generateId(contexts),
       platform: context.platform,
       title: context.title || generateTitle(context),
       messages: context.messages,
@@ -128,6 +129,77 @@ async function handleClearContexts(sendResponse) {
   try {
     await chrome.storage.local.set({ contexts: [] });
     sendResponse({ success: true });
+  } catch (err) {
+    sendResponse({ success: false, error: err.message });
+  }
+}
+
+async function handleMergeContexts(payload, sendResponse) {
+  try {
+    const { contextIds = [] } = payload;
+    const { contexts = [] } = await chrome.storage.local.get('contexts');
+    const targetContexts = contexts.filter(c => contextIds.includes(c.id));
+    if (targetContexts.length < 2) {
+      sendResponse({ success: false, error: 'Select at least 2 contexts to merge' });
+      return;
+    }
+
+    const mergedMessages = [];
+    targetContexts.forEach(c => {
+      if (Array.isArray(c.messages)) {
+        mergedMessages.push(...c.messages);
+      }
+    });
+
+    const combinedNodesMap = new Map();
+    const combinedEdges = [];
+    targetContexts.forEach(c => {
+      if (c.memoryGraph?.nodes) {
+        c.memoryGraph.nodes.forEach(n => {
+          if (!combinedNodesMap.has(n.id)) {
+            combinedNodesMap.set(n.id, n);
+          }
+        });
+      }
+      if (c.memoryGraph?.edges) {
+        combinedEdges.push(...c.memoryGraph.edges);
+      }
+    });
+
+    const mergedId = generateId(contexts);
+    const primaryPlatform = targetContexts[0].platform;
+    const mergedTitle = `Merged Context (${targetContexts.map(c => c.id).join(' + ')})`;
+
+    const mergedAiEnhanced = {
+      project_summary: targetContexts.map(c => c.aiEnhanced?.project_summary || c.title).filter(Boolean).join(' | '),
+      current_task: `Multi-session synthesis: ${targetContexts.map(c => c.id).join(', ')}`,
+      user_intent: 'Seamless continuity across merged sessions',
+      technical_stack: [...new Set(targetContexts.flatMap(c => c.aiEnhanced?.technical_stack || []))],
+      architecture_decisions: [...new Set(targetContexts.flatMap(c => c.aiEnhanced?.architecture_decisions || []))],
+      important_code: targetContexts.flatMap(c => c.aiEnhanced?.important_code || []).slice(0, 8),
+      pending_tasks: [...new Set(targetContexts.flatMap(c => c.aiEnhanced?.pending_tasks || []))],
+      handoffPrompt: `This merged context combines sessions ${targetContexts.map(c => c.id).join(' and ')}. Please continue development.`
+    };
+
+    const mergedContext = {
+      id: mergedId,
+      platform: primaryPlatform,
+      title: mergedTitle,
+      messages: mergedMessages,
+      messageCount: mergedMessages.length,
+      timestamp: Date.now(),
+      url: targetContexts[0].url || '',
+      aiStatus: 'success',
+      aiEnhanced: mergedAiEnhanced,
+      memoryGraph: {
+        nodes: Array.from(combinedNodesMap.values()),
+        edges: combinedEdges
+      }
+    };
+
+    const updated = [mergedContext, ...contexts].slice(0, MAX_SAVED_CONTEXTS);
+    await chrome.storage.local.set({ contexts: updated });
+    sendResponse({ success: true, mergedContext });
   } catch (err) {
     sendResponse({ success: false, error: err.message });
   }
@@ -350,8 +422,24 @@ function augmentMemoryGraph(memoryGraph, aiEnhanced) {
   return memoryGraph;
 }
 
-function generateId() {
-  return `ctx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+function generateId(existingContexts = []) {
+  let maxNum = 0;
+  if (Array.isArray(existingContexts)) {
+    existingContexts.forEach(c => {
+      if (c && c.id) {
+        const match = String(c.id).match(/^con_(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
+      }
+    });
+  }
+  const nextNum = maxNum + 1;
+  const padded = nextNum < 10 ? `0${nextNum}` : `${nextNum}`;
+  return `con_${padded}`;
 }
 
 function generateTitle(context) {

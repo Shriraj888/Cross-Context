@@ -1534,6 +1534,14 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  function formatGeminiHtml(text) {
+    if (!text) return '<p><br></p>';
+    return text.split('\n').map(line => {
+      const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return escaped.trim() ? `<p>${escaped}</p>` : '<p><br></p>';
+    }).join('');
+  }
+
   function insertTextProgrammatically(el, text) {
     try {
       el.click();
@@ -1582,16 +1590,26 @@
     } catch (_) {}
   }
 
-  function trySubmit(inputEl, submitSelectors) {
-    const btn = document.querySelector(submitSelectors);
-    const isDisabled = btn && (btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.classList.contains('disabled'));
-    if (btn && !isDisabled) {
-      btn.click();
-    } else {
+  async function trySubmit(inputEl, submitSelectors) {
+    for (let i = 0; i < 12; i++) {
+      const btn = document.querySelector(submitSelectors);
+      const isDisabled = btn && (btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.classList.contains('disabled'));
+      if (btn && !isDisabled) {
+        try {
+          btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+          btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        } catch (_) {}
+        btn.click();
+        return true;
+      }
+      await sleep(150);
+    }
+    if (inputEl) {
       inputEl.dispatchEvent(new KeyboardEvent('keydown', {
         key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
       }));
     }
+    return false;
   }
 
   async function waitForElement(selectors, maxRetries = 15, interval = 700) {
@@ -1604,11 +1622,83 @@
   }
 
   /**
+   * Creates an in-memory context.md File and attaches it to the platform's
+   * file input via the DataTransfer API. Falls back to simulating a drop
+   * event on the chat area if no <input type="file"> is found.
+   *
+   * @param {string} content - The formatted Markdown content
+   * @param {string} [dropTargetSelector] - Optional CSS selector for a drop target fallback
+   * @param {string} [fileName='context.md'] - Name of the file to attach
+   * @returns {{ success: boolean, method: string, error?: string }}
+   */
+  async function attachMarkdownFile(content, dropTargetSelector, fileName = 'context.md') {
+    const file = new File([content], fileName, { type: 'text/markdown' });
+
+    // Strategy 1: Find a visible <input type="file"> and set its files via DataTransfer
+    const fileInputs = document.querySelectorAll('input[type="file"]');
+    for (const fileInput of fileInputs) {
+      const accept = (fileInput.getAttribute('accept') || '').toLowerCase();
+      // Skip image-only inputs
+      if (accept && accept.includes('image/') && !accept.includes('*/*') && !accept.includes('.md') && !accept.includes('text/')) {
+        continue;
+      }
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+        fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+        // Wait for the UI to register the file
+        await sleep(500);
+        return { success: true, method: 'file-input' };
+      } catch (_) {
+        // This input didn't work, try the next one
+      }
+    }
+
+    // Strategy 2: Simulate a drop event on the chat area
+    const dropTarget = dropTargetSelector
+      ? document.querySelector(dropTargetSelector)
+      : document.querySelector('[contenteditable="true"], textarea, #prompt-textarea, .ProseMirror');
+
+    if (dropTarget) {
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+
+        const dragEnterEvt = new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt });
+        const dragOverEvt = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt });
+        const dropEvt = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
+
+        dropTarget.dispatchEvent(dragEnterEvt);
+        dropTarget.dispatchEvent(dragOverEvt);
+        dropTarget.dispatchEvent(dropEvt);
+
+        await sleep(800);
+        return { success: true, method: 'drop' };
+      } catch (_) {
+        // Drop simulation failed
+      }
+    }
+
+    return { success: false, method: 'none', error: 'No file input or drop target found' };
+  }
+
+  /** Helper to generate companion message typed into the input alongside the attached file */
+  function getCompanionMessage(fileName = 'context.md', contextId = '') {
+    const idStr = contextId ? ` (Context ID: ${contextId})` : '';
+    return `Please read the attached ${fileName}${idStr} and continue from where we left off. Use Context ID ${contextId || 'con_01'} to distinguish this conversation context.`;
+  }
+
+  /**
    * Preview-before-send: Shows a floating confirmation overlay with a truncated
    * preview of the injected prompt. Returns a Promise that resolves to the final prompt
    * string (send) or false (cancel). Uses Shadow DOM for CSS isolation.
+   * @param {string} prompt - The full formatted prompt text
+   * @param {boolean} [isFileMode=false] - If true, shows file-attachment badge in the header
+   * @param {string} [fileName='context.md'] - File name for the badge
    */
-  function showPreviewConfirmation(prompt) {
+  function showPreviewConfirmation(prompt, isFileMode = false, fileName = 'context.md') {
     return new Promise((resolve) => {
       // Remove any existing preview overlay
       const existingHost = document.getElementById('__cc-preview-host');
@@ -1704,6 +1794,28 @@
             font-size: 11px;
             color: rgba(255, 255, 255, 0.5);
             font-weight: 400;
+          }
+
+          .cc-mode-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            width: fit-content;
+            margin-top: 3px;
+          }
+          .cc-mode-badge.file {
+            background: rgba(167, 139, 250, 0.15);
+            color: #c4b5fd;
+            border: 1px solid rgba(167, 139, 250, 0.28);
+          }
+          .cc-mode-badge.text {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fcd34d;
+            border: 1px solid rgba(245, 158, 11, 0.28);
           }
 
           .cc-preview-body {
@@ -1810,8 +1922,9 @@
               <img src="${chrome.runtime.getURL('icons/icon128.png')}" class="cc-preview-logo" alt="Cross Context Logo" />
             </div>
             <div class="cc-preview-header-text">
-              <div class="cc-preview-title">Cross Context Transfer Ready</div>
-              <div class="cc-preview-subtitle">Review prompt before sending</div>
+              <div class="cc-preview-title">${isFileMode ? `📎 Attaching ${fileName}` : 'Cross Context Transfer Ready'}</div>
+              <div class="cc-preview-subtitle">${isFileMode ? 'Markdown file attached to platform file input' : 'Review prompt before sending'}</div>
+              <span class="cc-mode-badge ${isFileMode ? 'file' : 'text'}">${isFileMode ? `📄 Attached ${fileName}` : '📝 Text Paste Fallback'}</span>
             </div>
           </div>
           <div class="cc-preview-body" id="cc-preview-body-text">${previewText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
@@ -1872,67 +1985,186 @@
     });
   }
 
+  /** Helper to generate minimal companion instruction typed into the input box alongside attached context.md */
+  function getCompanionMessage(fileName = 'context.md', contextId = '') {
+    const idVal = contextId || 'con_01';
+    return `Continue this project using the attached \`${fileName}\` (Context ID: \`${idVal}\`). Respond only to the current task.`;
+  }
+
+  /** Generates Markdown File Block payload when native host file chip upload is blocked */
+  function formatFileBlockPayload(promptText, fileName = 'context.md', contextId = '') {
+    const idVal = contextId || 'con_01';
+    return `📁 **Attached Context File**: \`${fileName}\` (Context ID: \`${idVal}\`)
+================================================================
+
+\`\`\`markdown
+${promptText}
+\`\`\`
+
+================================================================
+Continue this project using the attached \`${fileName}\` file block above. Respond only to the current task.`;
+  }
+
+  /**
+   * Polls for file attachment upload readiness on the target platform
+   * @param {string} platform - The host platform name
+   * @param {number} [timeoutMs=1500] - Max wait time in ms
+   */
+  async function waitForFileUploadComplete(platform, timeoutMs = 1500) {
+    const selectors = {
+      claude: '[aria-label*="Attachment"], [class*="file-thumbnail"], [class*="attachment"], [data-testid*="file"]',
+      chatgpt: '[data-testid="file-chip"], [class*="attachment-item"], [class*="file-"], [data-testid*="attachment"]',
+      gemini: 'uploader-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"]',
+      grok: '[class*="attachment"], [class*="file-chip"], [class*="file-"]',
+      perplexity: '[class*="file-badge"], [class*="attachment"], [class*="file-"]'
+    };
+    const sel = selectors[platform];
+    if (!sel) return true;
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (document.querySelector(sel)) {
+        await sleep(250);
+        return true;
+      }
+      await sleep(100);
+    }
+    return false;
+  }
+
   const INJECTORS = {
 
-    async claude(prompt) {
+    async claude(prompt, contextId) {
       const el = await waitForElement(
         'div.ProseMirror[contenteditable="true"], [contenteditable="true"][data-placeholder], [data-testid="compose-input"] [contenteditable], [contenteditable="true"], textarea'
       );
       if (!el) return { success: false, error: 'Claude input not found' };
-      insertTextProgrammatically(el, prompt);
-      const confirmed = await showPreviewConfirmation(prompt);
+
+      const fileName = contextId ? `context-${contextId}.md` : 'context.md';
+      const fileResult = await attachMarkdownFile(prompt, null, fileName);
+      const isFileAttached = fileResult.success && (await waitForFileUploadComplete('claude', 1000));
+
+      const payload = isFileAttached
+        ? getCompanionMessage(fileName, contextId)
+        : formatFileBlockPayload(prompt, fileName, contextId);
+
+      insertTextProgrammatically(el, payload);
+      const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, 'button[aria-label*="Send"], button[data-testid*="send"], button[aria-label="Send Message"], button[class*="send"]');
       return { success: true };
     },
 
-    async chatgpt(prompt) {
+    async chatgpt(prompt, contextId) {
       const el = await waitForElement(
         '#prompt-textarea, div[contenteditable="true"].ProseMirror, textarea[placeholder], [contenteditable="true"]'
       );
       if (!el) return { success: false, error: 'ChatGPT input not found' };
-      insertTextProgrammatically(el, prompt);
-      const confirmed = await showPreviewConfirmation(prompt);
+
+      const fileName = contextId ? `context-${contextId}.md` : 'context.md';
+      const fileResult = await attachMarkdownFile(prompt, null, fileName);
+      const isFileAttached = fileResult.success && (await waitForFileUploadComplete('chatgpt', 1000));
+
+      const payload = isFileAttached
+        ? getCompanionMessage(fileName, contextId)
+        : formatFileBlockPayload(prompt, fileName, contextId);
+
+      insertTextProgrammatically(el, payload);
+      const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, '[data-testid="send-button"], button[aria-label="Send message"], button[aria-label="Send prompt"], button[data-testid*="send"], button[class*="send"]');
       return { success: true };
     },
 
-    async gemini(prompt) {
+    async gemini(prompt, contextId) {
       const el = await waitForElement(
-        'rich-textarea [contenteditable="true"], .ql-editor[contenteditable="true"], div[contenteditable="true"][data-placeholder], [contenteditable="true"]'
+        'rich-textarea div[contenteditable="true"], rich-textarea [contenteditable="true"], .ql-editor[contenteditable="true"], div[role="textbox"][contenteditable="true"], div[contenteditable="true"]'
       );
       if (!el) return { success: false, error: 'Gemini input not found' };
-      insertTextProgrammatically(el, prompt);
-      const confirmed = await showPreviewConfirmation(prompt);
+
+      const fileName = contextId ? `context-${contextId}.md` : 'context.md';
+
+      // 1. Reveal file input by triggering Gemini upload button if present
+      const uploadBtn = document.querySelector('button[aria-label*="Upload"], button[aria-label*="Add files"], button[aria-label*="file"], uploader-button, button[mattooltip*="Upload"]');
+      if (uploadBtn) {
+        try { uploadBtn.click(); await sleep(250); } catch (_) {}
+      }
+
+      // 2. Attach Markdown file
+      const fileResult = await attachMarkdownFile(prompt, 'rich-textarea', fileName);
+      const isFileAttached = fileResult.success && (await waitForFileUploadComplete('gemini', 1200));
+
+      // 3. Choose payload: short companion message if native chip attached, otherwise formatted File Block
+      const payload = isFileAttached
+        ? getCompanionMessage(fileName, contextId)
+        : formatFileBlockPayload(prompt, fileName, contextId);
+
+      // 4. Set formatted innerHTML for Gemini Angular contenteditable editor
+      el.focus();
+      try {
+        el.innerHTML = formatGeminiHtml(payload);
+      } catch (_) {
+        insertTextProgrammatically(el, payload);
+      }
+
+      dispatchInputEvents(el);
+      try {
+        const richTextarea = el.closest('rich-textarea');
+        if (richTextarea) dispatchInputEvents(richTextarea);
+      } catch (_) {}
+
+      await sleep(200);
+
+      // 5. Show preview confirmation overlay
+      const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
-      await sleep(300);
-      trySubmit(el, 'button.send-button, button[aria-label*="Send"], button[mattooltip*="Send"], button[class*="send"]');
+      await sleep(350);
+
+      // 6. Submit to Gemini
+      const submitSelectors = 'button.send-button, button[aria-label*="Send message"], button[aria-label*="Send prompt"], button[aria-label*="Send"], button[mattooltip*="Send"], button.send-button-container, [data-test-id="send-button"], button.submit-button';
+      await trySubmit(el, submitSelectors);
       return { success: true };
     },
 
-    async grok(prompt) {
+    async grok(prompt, contextId) {
       const el = await waitForElement(
         'textarea[placeholder*="Ask"], textarea[placeholder*="Grok"], textarea[class*="input"], [contenteditable="true"], textarea'
       );
       if (!el) return { success: false, error: 'Grok input not found' };
-      insertTextProgrammatically(el, prompt);
-      const confirmed = await showPreviewConfirmation(prompt);
+
+      const fileName = contextId ? `context-${contextId}.md` : 'context.md';
+      const fileResult = await attachMarkdownFile(prompt, null, fileName);
+      const isFileAttached = fileResult.success && (await waitForFileUploadComplete('grok', 1000));
+
+      const payload = isFileAttached
+        ? getCompanionMessage(fileName, contextId)
+        : formatFileBlockPayload(prompt, fileName, contextId);
+
+      insertTextProgrammatically(el, payload);
+      const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, 'button[aria-label*="Send"], button[type="submit"], button[data-testid*="send"], button[class*="send"]');
       return { success: true };
     },
 
-    async perplexity(prompt) {
+    async perplexity(prompt, contextId) {
       const el = await waitForElement(
         'textarea[placeholder*="Ask"], textarea[placeholder*="Search"], textarea[class*="textarea"], textarea, [contenteditable="true"]'
       );
       if (!el) return { success: false, error: 'Perplexity input not found' };
-      insertTextProgrammatically(el, prompt);
-      const confirmed = await showPreviewConfirmation(prompt);
+
+      const fileName = contextId ? `context-${contextId}.md` : 'context.md';
+      const fileResult = await attachMarkdownFile(prompt, null, fileName);
+      const isFileAttached = fileResult.success && (await waitForFileUploadComplete('perplexity', 1000));
+
+      const payload = isFileAttached
+        ? getCompanionMessage(fileName, contextId)
+        : formatFileBlockPayload(prompt, fileName, contextId);
+
+      insertTextProgrammatically(el, payload);
+      const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
       await sleep(300);
       trySubmit(el, 'button[aria-label*="Submit"], button[type="submit"], button[class*="send"]');
@@ -2339,8 +2571,27 @@
   };
 
   function formatContextPrompt(context, targetPlatform) {
+    const idVal = context.id || 'con_01';
+    const idTag = `# 📄 Cross-Context Knowledge Transfer — Context ID: \`${idVal}\`
+
+> ⚠️ **SYSTEM INSTRUCTION FOR RECEIVING AI MODEL**:
+> This file contains an exported context snapshot identified by **Context ID: \`${idVal}\`**.
+> Use this **Context ID (\`${idVal}\`)** to uniquely identify, track, and differentiate this project history and state from any other context files (e.g. \`con_01\`, \`con_02\`, \`con_03\`). Do not mix up memory states across different Context IDs.
+
+---
+
+`;
+
+    const srcName = PLATFORM_NAMES[context.platform] || context.platform;
+    const transcriptSection = Array.isArray(context.messages) && context.messages.length > 0
+      ? `\n\n---\n\n## 💬 Full Conversation Transcript\n\n` + context.messages.map(m => {
+          const roleHeader = m.role === 'user' ? '### 👤 User' : `### 🤖 ${srcName}`;
+          return `${roleHeader}\n${m.content}`;
+        }).join('\n\n')
+      : '';
+
     if (context.aiEnhanced && context.aiStatus === 'success') {
-      const src = PLATFORM_NAMES[context.platform] || context.platform;
+      const src = srcName;
       const e = context.aiEnhanced;
       const summary = e.project_summary || '';
       const task = e.current_task || '';
@@ -2380,7 +2631,7 @@
 
       if (dominantIntent === 'coding') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Coding Briefing]
-I was working on a coding project with ${src}. Here is where we left off:
+${idTag}I was working on a coding project with ${src}. Here is where we left off:
 
 📁 What I was building:
 - Project Summary: ${summary}
@@ -2404,12 +2655,12 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
       }
 
       if (dominantIntent === 'debugging') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Debugging Briefing]
-I was working on debugging an issue with ${src}. Here is where we left off:
+${idTag}I was working on debugging an issue with ${src}. Here is where we left off:
 
 📁 What I was building & testing:
 - Project Summary: ${summary}
@@ -2432,12 +2683,12 @@ ${bulletJoin(e.failed_attempts)}
 ${bulletJoin(e.successful_solutions)}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
       }
 
       if (dominantIntent === 'brainstorming') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Brainstorming Briefing]
-I was brainstorming and planning with ${src}. Here is where we left off:
+${idTag}I was brainstorming and planning with ${src}. Here is where we left off:
 
 📁 What I was building/planning:
 - Core Topic/Overview: ${summary}
@@ -2463,12 +2714,12 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
       }
 
       if (dominantIntent === 'research') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Research Briefing]
-I was researching and studying with ${src}. Here is where we left off:
+${idTag}I was researching and studying with ${src}. Here is where we left off:
 
 📁 What I was researching:
 - Research Focus: ${summary}
@@ -2491,12 +2742,12 @@ ${bulletJoin(e.user_preferences)}
 - Knowledge Goal: ${intent}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
       }
 
       if (dominantIntent === 'writing') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Writing Briefing]
-I was drafting and composing text with ${src}. Here is where we left off:
+${idTag}I was drafting and composing text with ${src}. Here is where we left off:
 
 📁 What I was writing:
 - Narrative/Content Overview: ${summary}
@@ -2516,12 +2767,12 @@ ${bulletJoin(e.user_preferences)}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
       }
 
       // General fallback
       return `[🔄 AI-Enhanced Cross Context Transfer — Briefing]
-I was working on a project with ${src}. Here is where we left off:
+${idTag}I was working on a project with ${src}. Here is where we left off:
 
 📁 What I was building:
 - Project Summary: ${summary}
@@ -2541,7 +2792,7 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -2740,7 +2991,7 @@ ${handoff}`;
     const handoffTruncated = handoffHint.length > 300 ? handoffHint.substring(0, 300) + '...' : handoffHint;
 
     return `[🔄 Cross Context Transfer — State Restoration Briefing]
-I was working on a project with ${src}. Here is where we left off:
+${idTag}I was working on a project with ${src}. Here is where we left off:
 
 ⚙️ What I was building:
 - System Context: ${packet.system_context}
@@ -2771,7 +3022,7 @@ ${packet.active_tasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
 ${handoffTruncated}
 
 ---
-Please acknowledge these details. Tell me what tasks you are taking over, and ask me what we should focus on next to continue seamlessly.`;
+Please acknowledge these details. Tell me what tasks you are taking over, and ask me what we should focus on next to continue seamlessly.${transcriptSection}`;
   }
 
   // ════════════════════════════════════════════
@@ -3463,7 +3714,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
     let contextId = null;
     let plainText = null;
 
-    // 1) Try dataTransfer (works if popup is still open — rare but possible)
+    // 1) Try dataTransfer
     try {
       const raw = e.dataTransfer?.getData('text/x-cross-context');
       if (raw) contextId = JSON.parse(raw).id;
@@ -3471,12 +3722,17 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
 
     try {
       plainText = e.dataTransfer?.getData('text/plain') || null;
-      if (!contextId && plainText && !plainText.includes('[🔄 Cross Context Transfer]')) {
-        contextId = plainText.trim();
+      if (plainText) {
+        // Extract context ID if embedded in text (e.g. Context ID: `con_02`)
+        const idMatch = plainText.match(/Context ID:\s*[`"]?([a-zA-Z0-9_-]+)[`"]?/i);
+        if (idMatch && !contextId) contextId = idMatch[1];
+        if (!contextId && !plainText.includes('Cross-Context') && !plainText.includes('Cross Context')) {
+          contextId = plainText.trim();
+        }
       }
     } catch (_) {}
 
-    // 2) Always prefer storage — popup is almost certainly closed by now
+    // 2) Prefer storage from popup dragstart
     try {
       const { pendingDrop } = await chrome.storage.local.get('pendingDrop');
       if (pendingDrop?.id && Date.now() - pendingDrop.timestamp < 30000) {
@@ -3484,7 +3740,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       }
     } catch (_) {}
 
-    const hasFallbackText = plainText && plainText.includes('[🔄 Cross Context Transfer]');
+    const hasFallbackText = plainText && (plainText.includes('Cross-Context') || plainText.includes('Cross Context'));
     if (!contextId && !hasFallbackText) {
       if (ol) ol.classList.add('error-state');
       if (arrowEl) arrowEl.innerHTML  = ERROR_SVG;
@@ -3527,8 +3783,8 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       const injector = INJECTORS[platform];
       if (!injector) throw new Error(`No injector for "${platform}". Is this an LLM page?`);
 
-      // Format and inject
-      const result = await injector(formatted);
+      // Format and inject (pass contextId explicitly!)
+      const result = await injector(formatted, contextId);
       if (!result?.success) throw new Error(result?.error || 'Injection returned failure.');
 
       // ✅ Success
@@ -3642,7 +3898,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       }
       const anim = runInjectionAnimation(message.context.platform);
       const formatted = formatContextPrompt(message.context, message.targetPlatform);
-      injector(formatted).then(result => {
+      injector(formatted, message.context?.id).then(result => {
         if (result?.success) {
           anim.success(message.targetPlatform);
         } else {
@@ -3719,7 +3975,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       const formatted = formatContextPrompt(context, targetPlatform);
       
       try {
-        const result = await injector(formatted);
+        const result = await injector(formatted, context.id);
         if (result?.success) {
           anim.success(targetPlatform);
         } else {
