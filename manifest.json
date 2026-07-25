@@ -34,6 +34,8 @@
         "https://gemini.google.com/*",
         "https://grok.com/*",
         "https://x.com/i/grok*",
+        "https://x.com/grok*",
+        "https://x.ai/*",
         "https://www.perplexity.ai/*"
       ],
       "js": ["content/content.js"],

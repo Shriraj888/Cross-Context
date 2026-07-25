@@ -73,7 +73,6 @@ function getPlatformIcon(platformKey, size = 16) {
 // State
 // ──────────────────────────────────────────
 let savedContexts = [];
-let selectedContextIds = new Set();
 let currentTabPlatform = null;
 let draggedContextId = null;
 let dragToPageHintTimer = null;
@@ -296,19 +295,6 @@ async function loadContexts() {
 function renderContexts() {
   contextCountBadge.textContent = savedContexts.length;
 
-  const btnMergeContexts = $('btn-merge-contexts');
-  if (btnMergeContexts) {
-    const count = selectedContextIds.size;
-    if (savedContexts.length >= 2) {
-      btnMergeContexts.style.display = 'inline-flex';
-      const labelSpan = btnMergeContexts.querySelector('span');
-      if (labelSpan) labelSpan.textContent = `Merge (${count})`;
-      btnMergeContexts.style.opacity = count >= 2 ? '1' : '0.6';
-    } else {
-      btnMergeContexts.style.display = 'none';
-    }
-  }
-
   if (dragInstructionBanner) {
     if (savedContexts.length > 0) {
       dragInstructionBanner.classList.remove('hidden');
@@ -417,9 +403,6 @@ function createContextCard(ctx) {
     </span>`;
   }
 
-  const isSelected = selectedContextIds.has(ctx.id);
-  const selectBoxHtml = `<div class="context-card-checkbox ${isSelected ? 'selected' : ''}" data-action="toggle-select" data-id="${ctx.id}" title="${isSelected ? 'Deselect for merge' : 'Select to merge with another context'}">${isSelected ? '✓' : ''}</div>`;
-
   // Filter platforms to other platforms for quick handoff targets
   const targets = Object.keys(PLATFORMS).filter(p => p !== ctx.platform);
   let targetsHtml = '';
@@ -435,9 +418,8 @@ function createContextCard(ctx) {
   card.innerHTML = `
     <div class="card-main">
       <div class="card-left">
-        ${selectBoxHtml}
         <span class="card-platform-icon">
-          ${getPlatformIcon(ctx.platform, 18)}
+          ${getPlatformIcon(ctx.platform, 22)}
         </span>
         <div class="card-text">
           <div class="card-title" title="${escapeHtml(ctx.title)}">${escapeHtml(ctx.title)}</div>
@@ -666,14 +648,7 @@ function bindEvents() {
     if (!actionEl) return;
     const { action, id } = actionEl.dataset;
     
-    if (action === 'toggle-select') {
-      if (selectedContextIds.has(id)) {
-        selectedContextIds.delete(id);
-      } else {
-        selectedContextIds.add(id);
-      }
-      renderContexts();
-    } else if (action === 'preview') {
+    if (action === 'preview') {
       openPreviewModal(id);
     } else if (action === 'delete') {
       handleDeleteContext(id);
@@ -684,29 +659,6 @@ function bindEvents() {
       handleQuickInject(id, target);
     }
   });
-
-  const btnMergeContexts = $('btn-merge-contexts');
-  if (btnMergeContexts) {
-    btnMergeContexts.addEventListener('click', async () => {
-      const ids = Array.from(selectedContextIds);
-      if (ids.length < 2) {
-        showToast('Select at least 2 contexts to merge', 'error');
-        return;
-      }
-      showToast('⚡ Merging selected contexts…', 'info');
-      const response = await sendMessage({
-        type: 'MERGE_CONTEXTS',
-        payload: { contextIds: ids }
-      });
-      if (response?.success) {
-        selectedContextIds.clear();
-        await loadContexts();
-        showToast(`✓ Merged into ${response.mergedContext?.id || 'new context'}!`, 'success');
-      } else {
-        showToast(response?.error || 'Merge failed', 'error');
-      }
-    });
-  }
 
   // Live Search Input Handler
   searchInput.addEventListener('input', () => {

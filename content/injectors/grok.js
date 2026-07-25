@@ -1,21 +1,31 @@
 // Cross Context — Grok Injector
-// Injects context into grok.com's input field
+// Injects context into grok.com & x.com/i/grok input fields
 
 export async function injectContext(formattedPrompt) {
   return new Promise((resolve) => {
     const attempt = (retries = 0) => {
-      // Grok uses a textarea or contenteditable
-      const inputEl = document.querySelector(
-        'textarea[placeholder*="Ask"], ' +
-        'textarea[placeholder*="Grok"], ' +
-        '[contenteditable="true"][placeholder], ' +
-        'textarea.r-30o5oe, ' +
-        'textarea[class*="input"]'
-      );
+      const selectors = [
+        'textarea[data-testid*="grok"]',
+        'textarea[placeholder*="Ask"]',
+        'textarea[placeholder*="Grok"]',
+        'textarea[placeholder*="anything"]',
+        'textarea[placeholder*="know"]',
+        'textarea[placeholder*="prompt"]',
+        'textarea[placeholder*="message"]',
+        'div[contenteditable="true"][data-testid*="grok"]',
+        'div[contenteditable="true"][role="textbox"]',
+        'div[contenteditable="true"]',
+        'textarea.r-30o5oe',
+        'textarea[class*="input"]',
+        'form textarea',
+        'textarea'
+      ].join(', ');
+
+      const inputEl = document.querySelector(selectors);
 
       if (!inputEl) {
-        if (retries < 12) {
-          setTimeout(() => attempt(retries + 1), 700);
+        if (retries < 40) {
+          setTimeout(() => attempt(retries + 1), 50);
         } else {
           resolve({ success: false, error: 'Grok input not found' });
         }
@@ -23,18 +33,34 @@ export async function injectContext(formattedPrompt) {
       }
 
       inputEl.focus();
-      inputEl.click();
+      try { inputEl.click(); } catch (_) {}
 
       if (inputEl.tagName === 'TEXTAREA' || inputEl.tagName === 'INPUT') {
-        inputEl.select();
-        const success = document.execCommand('insertText', false, formattedPrompt);
-        if (!success || inputEl.value !== formattedPrompt) {
-          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-            window.HTMLTextAreaElement.prototype, 'value'
-          ).set;
-          nativeInputValueSetter.call(inputEl, formattedPrompt);
-          inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-          inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+        const tracker = inputEl._valueTracker;
+        if (tracker) { try { tracker.setValue(''); } catch (_) {} }
+
+        const setter = Object.getOwnPropertyDescriptor(
+          inputEl.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+          'value'
+        )?.set;
+
+        if (setter) {
+          setter.call(inputEl, formattedPrompt);
+        } else {
+          inputEl.value = formattedPrompt;
+        }
+
+        try {
+          inputEl.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: formattedPrompt, bubbles: true, cancelable: true }));
+          inputEl.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: formattedPrompt, bubbles: true }));
+        } catch (_) {}
+
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+
+        if (inputEl.value !== formattedPrompt) {
+          inputEl.select();
+          document.execCommand('insertText', false, formattedPrompt);
         }
       } else {
         const selection = window.getSelection();
@@ -46,29 +72,49 @@ export async function injectContext(formattedPrompt) {
         const success = document.execCommand('insertText', false, formattedPrompt);
         if (!success || !inputEl.textContent.trim()) {
           inputEl.innerText = formattedPrompt;
-          inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-          inputEl.dispatchEvent(new Event('change', { bubbles: true }));
         }
+        try {
+          inputEl.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: formattedPrompt, bubbles: true }));
+        } catch (_) {}
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
       }
 
-      // Auto-submit
+      // Submit
       setTimeout(() => {
-        const sendBtn = document.querySelector(
-          'button[aria-label*="Send"], ' +
-          'button[type="submit"], ' +
-          '[data-testid*="send"]'
-        );
+        const submitSelectors = [
+          'button[aria-label*="Send"]',
+          'button[aria-label*="Submit"]',
+          'button[aria-label*="Grok"]',
+          'button[aria-label*="Ask"]',
+          'button[data-testid*="grok"]',
+          'button[data-testid*="send"]',
+          'button[data-testid*="submit"]',
+          'button[type="submit"]',
+          'form button[type="submit"]',
+          'button[class*="send"]',
+          'button[class*="submit"]',
+          'div[role="button"][aria-label*="Send"]',
+          'form button'
+        ].join(', ');
+
+        const sendBtn = document.querySelector(submitSelectors);
         const isDisabled = sendBtn && (sendBtn.disabled || sendBtn.getAttribute('aria-disabled') === 'true' || sendBtn.classList.contains('disabled'));
+
         if (sendBtn && !isDisabled) {
+          try {
+            sendBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            sendBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+          } catch (_) {}
           sendBtn.click();
           resolve({ success: true });
         } else {
           inputEl.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
+            key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
           }));
           resolve({ success: true });
         }
-      }, 1200);
+      }, 40);
     };
 
     attempt();

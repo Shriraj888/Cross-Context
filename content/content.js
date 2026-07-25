@@ -16,8 +16,8 @@
     if (hostname.includes('claude.ai'))         return 'claude';
     if (hostname.includes('chatgpt.com'))       return 'chatgpt';
     if (hostname.includes('gemini.google.com')) return 'gemini';
-    if (hostname.includes('grok.com'))          return 'grok';
-    if (hostname.includes('x.com') && pathname.includes('grok')) return 'grok';
+    if (hostname.includes('grok.com') || hostname.includes('x.ai')) return 'grok';
+    if (hostname.includes('x.com') && (pathname.includes('grok') || pathname.includes('/i/grok'))) return 'grok';
     if (hostname.includes('perplexity.ai'))     return 'perplexity';
     return null;
   }
@@ -582,7 +582,7 @@
    * Resolves when no new childList/subtree mutations fire for `quietMs`.
    * Times out after `maxMs` to prevent hanging on infinite-streaming responses.
    */
-  function waitForDomSettled(root = document.body, quietMs = 600, maxMs = 5000) {
+  function waitForDomSettled(root = document.body, quietMs = 150, maxMs = 1200) {
     return new Promise(resolve => {
       let timer = null;
       const deadline = setTimeout(() => { observer.disconnect(); resolve(); }, maxMs);
@@ -1523,13 +1523,26 @@
 
   function setNativeValue(el, value) {
     if (el.tagName === 'TEXTAREA') {
+      const tracker = el._valueTracker;
+      if (tracker) { try { tracker.setValue(''); } catch (_) {} }
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (setter) { setter.call(el, value); return; }
+    } else if (el.tagName === 'INPUT') {
+      const tracker = el._valueTracker;
+      if (tracker) { try { tracker.setValue(''); } catch (_) {} }
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
       if (setter) { setter.call(el, value); return; }
     }
     el.value = value;
   }
 
   function dispatchInputEvents(el) {
+    try {
+      el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: el.value || el.textContent, bubbles: true, cancelable: true }));
+    } catch (_) {}
+    try {
+      el.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: el.value || el.textContent, bubbles: true }));
+    } catch (_) {}
     el.dispatchEvent(new Event('input',  { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
@@ -1560,10 +1573,12 @@
     } catch (_) {}
 
     if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-      el.select();
-      const success = document.execCommand('insertText', false, text);
-      if (!success || el.value !== text) {
-        setNativeValue(el, text);
+      setNativeValue(el, text);
+      dispatchInputEvents(el);
+      // Fallback execCommand if setNativeValue didn't stick
+      if (el.value !== text) {
+        el.select();
+        document.execCommand('insertText', false, text);
         dispatchInputEvents(el);
       }
     } else {
@@ -1580,18 +1595,20 @@
       }
     }
 
-    // Trigger post-input react state bindings
+    // Trigger post-input react/vue state bindings
     try {
       el.dispatchEvent(new InputEvent('input', {
         inputType: 'insertText',
         data: text,
         bubbles: true
       }));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
     } catch (_) {}
   }
 
   async function trySubmit(inputEl, submitSelectors) {
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 25; i++) {
       const btn = document.querySelector(submitSelectors);
       const isDisabled = btn && (btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.classList.contains('disabled'));
       if (btn && !isDisabled) {
@@ -1602,7 +1619,7 @@
         btn.click();
         return true;
       }
-      await sleep(150);
+      await sleep(40);
     }
     if (inputEl) {
       inputEl.dispatchEvent(new KeyboardEvent('keydown', {
@@ -1612,7 +1629,7 @@
     return false;
   }
 
-  async function waitForElement(selectors, maxRetries = 15, interval = 700) {
+  async function waitForElement(selectors, maxRetries = 40, interval = 50) {
     for (let i = 0; i < maxRetries; i++) {
       const el = document.querySelector(selectors);
       if (el) return el;
@@ -1632,10 +1649,14 @@
    * @returns {{ success: boolean, method: string, error?: string }}
    */
   async function attachMarkdownFile(content, dropTargetSelector, fileName = 'context.md') {
+    const fileInputs = document.querySelectorAll('input[type="file"]');
+    if (fileInputs.length === 0) {
+      return { success: false, method: 'none', error: 'No file input found' };
+    }
+
     const file = new File([content], fileName, { type: 'text/markdown' });
 
     // Strategy 1: Find a visible <input type="file"> and set its files via DataTransfer
-    const fileInputs = document.querySelectorAll('input[type="file"]');
     for (const fileInput of fileInputs) {
       const accept = (fileInput.getAttribute('accept') || '').toLowerCase();
       // Skip image-only inputs
@@ -1648,11 +1669,10 @@
         fileInput.files = dt.files;
         fileInput.dispatchEvent(new Event('change', { bubbles: true }));
         fileInput.dispatchEvent(new Event('input', { bubbles: true }));
-        // Wait for the UI to register the file
-        await sleep(500);
+        await sleep(150);
         return { success: true, method: 'file-input' };
       } catch (_) {
-        // This input didn't work, try the next one
+        // Next input
       }
     }
 
@@ -1951,18 +1971,16 @@
       const cancelBtn = shadow.getElementById('cc-preview-cancel');
 
       const cleanup = (resultValue) => {
-        host.remove();
-        resolve(resultValue);
+        try { host.remove(); } catch (_) {}
       };
 
-      const wrappedCleanup = (resultValue) => {
-        document.removeEventListener('keydown', keyHandler);
-        clearTimeout(timeoutId);
-        cleanup(resultValue);
-      };
+      const autoDismissId = setTimeout(() => cleanup(true), 1200);
 
-      sendBtn.addEventListener('click', () => wrappedCleanup(true));
-      cancelBtn.addEventListener('click', () => wrappedCleanup(false));
+      sendBtn.addEventListener('click', () => { clearTimeout(autoDismissId); cleanup(true); });
+      cancelBtn.addEventListener('click', () => { clearTimeout(autoDismissId); cleanup(false); });
+
+      // Fast non-blocking auto-resolve
+      resolve(true);
 
       // Keyboard: Enter to send, Escape to cancel
       const keyHandler = (e) => {
@@ -2010,7 +2028,7 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
    * @param {string} platform - The host platform name
    * @param {number} [timeoutMs=1500] - Max wait time in ms
    */
-  async function waitForFileUploadComplete(platform, timeoutMs = 1500) {
+  async function waitForFileUploadComplete(platform, timeoutMs = 250) {
     const selectors = {
       claude: '[aria-label*="Attachment"], [class*="file-thumbnail"], [class*="attachment"], [data-testid*="file"]',
       chatgpt: '[data-testid="file-chip"], [class*="attachment-item"], [class*="file-"], [data-testid*="attachment"]',
@@ -2020,13 +2038,11 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
     };
     const sel = selectors[platform];
     if (!sel) return true;
+    if (document.querySelector(sel)) return true;
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      if (document.querySelector(sel)) {
-        await sleep(250);
-        return true;
-      }
-      await sleep(100);
+      if (document.querySelector(sel)) return true;
+      await sleep(30);
     }
     return false;
   }
@@ -2128,9 +2144,24 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
     },
 
     async grok(prompt, contextId) {
-      const el = await waitForElement(
-        'textarea[placeholder*="Ask"], textarea[placeholder*="Grok"], textarea[class*="input"], [contenteditable="true"], textarea'
-      );
+      const grokSelectors = [
+        'textarea[data-testid*="grok"]',
+        'textarea[placeholder*="Ask"]',
+        'textarea[placeholder*="Grok"]',
+        'textarea[placeholder*="anything"]',
+        'textarea[placeholder*="know"]',
+        'textarea[placeholder*="prompt"]',
+        'textarea[placeholder*="message"]',
+        'div[contenteditable="true"][data-testid*="grok"]',
+        'div[contenteditable="true"][role="textbox"]',
+        'div[contenteditable="true"]',
+        'textarea.r-30o5oe',
+        'textarea[class*="input"]',
+        'form textarea',
+        'textarea'
+      ].join(', ');
+
+      const el = await waitForElement(grokSelectors, 20, 500);
       if (!el) return { success: false, error: 'Grok input not found' };
 
       const fileName = contextId ? `context-${contextId}.md` : 'context.md';
@@ -2144,8 +2175,29 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
       insertTextProgrammatically(el, payload);
       const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
-      await sleep(300);
-      trySubmit(el, 'button[aria-label*="Send"], button[type="submit"], button[data-testid*="send"], button[class*="send"]');
+
+      // Re-focus and ensure value binding is active after user clicks send in preview dialog
+      el.focus();
+      insertTextProgrammatically(el, payload);
+      await sleep(350);
+
+      const grokSubmitSelectors = [
+        'button[aria-label*="Send"]',
+        'button[aria-label*="Submit"]',
+        'button[aria-label*="Grok"]',
+        'button[aria-label*="Ask"]',
+        'button[data-testid*="grok"]',
+        'button[data-testid*="send"]',
+        'button[data-testid*="submit"]',
+        'button[type="submit"]',
+        'form button[type="submit"]',
+        'button[class*="send"]',
+        'button[class*="submit"]',
+        'div[role="button"][aria-label*="Send"]',
+        'form button'
+      ].join(', ');
+
+      await trySubmit(el, grokSubmitSelectors);
       return { success: true };
     },
 
@@ -3821,8 +3873,8 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
           activeScrapeTextCache = new WeakMap();
           startScrapingSession();
 
-          // Wait for DOM to settle (handles lazy loading / streaming responses)
-          await waitForDomSettled(document.body, 600, 5000);
+          // Wait for DOM to settle
+          await waitForDomSettled(document.body, 150, 1200);
 
           // Handle virtualized / lazy-loaded scroll containers
           const chatRoot = document.querySelector(
@@ -3839,7 +3891,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
             return;
           }
 
-          await sleep(350); // Fluid animation transition beat
+          await sleep(30);
           const { messages, title } = scraper();
           
           anim.setState('formatting');
@@ -3860,7 +3912,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
             delete msg.element;
           });
           
-          await sleep(400); // Polished animation synthesis delay
+          await sleep(40);
           anim.success();
           sendResponse({
             success: true,
@@ -3963,8 +4015,6 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
 
       isInjectionActive = true; // Lock immediately!
 
-      await sleep(1500); // wait for page to render
-
       const injector = INJECTORS[targetPlatform];
       if (!injector) {
         isInjectionActive = false;
@@ -3995,11 +4045,11 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
     }
   }
 
-  // Run auto-inject check on page load
+  // Run auto-inject check on page load immediately
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(checkPendingInjection, 1000));
+    document.addEventListener('DOMContentLoaded', checkPendingInjection);
   } else {
-    setTimeout(checkPendingInjection, 1000);
+    checkPendingInjection();
   }
 
 })();
