@@ -426,9 +426,9 @@ async function evictImagesForQuota(contexts) {
  * then sends the DO_INJECT message. Replaces the fragile setTimeout(2500).
  * Retries up to maxAttempts with increasing delay.
  */
-async function pollAndInject(tabId, targetPlatform, context, maxAttempts = 15, baseDelay = 500) {
+async function pollAndInject(tabId, targetPlatform, context, maxAttempts = 20, baseDelay = 200) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const delay = Math.min(baseDelay + attempt * 200, 2000);
+    const delay = Math.min(baseDelay + attempt * 150, 1500);
     await new Promise(r => setTimeout(r, delay));
 
     try {

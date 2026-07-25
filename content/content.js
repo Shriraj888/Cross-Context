@@ -2144,24 +2144,18 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
     },
 
     async grok(prompt, contextId) {
-      const grokSelectors = [
-        'textarea[data-testid*="grok"]',
+      // Grok's actual DOM: <textarea placeholder="Ask Grok" aria-label="Ask Grok anything">
+      // Submit button: <button aria-label="Submit"> — only renders AFTER React detects text input
+      const grokInputSelectors = [
+        'textarea[placeholder*="Ask Grok"]',
+        'textarea[aria-label*="Grok"]',
         'textarea[placeholder*="Ask"]',
-        'textarea[placeholder*="Grok"]',
         'textarea[placeholder*="anything"]',
-        'textarea[placeholder*="know"]',
-        'textarea[placeholder*="prompt"]',
         'textarea[placeholder*="message"]',
-        'div[contenteditable="true"][data-testid*="grok"]',
-        'div[contenteditable="true"][role="textbox"]',
-        'div[contenteditable="true"]',
-        'textarea.r-30o5oe',
-        'textarea[class*="input"]',
-        'form textarea',
         'textarea'
       ].join(', ');
 
-      const el = await waitForElement(grokSelectors, 20, 500);
+      const el = await waitForElement(grokInputSelectors);
       if (!el) return { success: false, error: 'Grok input not found' };
 
       const fileName = contextId ? `context-${contextId}.md` : 'context.md';
@@ -2172,32 +2166,90 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
         ? getCompanionMessage(fileName, contextId)
         : formatFileBlockPayload(prompt, fileName, contextId);
 
-      insertTextProgrammatically(el, payload);
+      // Focus the textarea first
+      el.focus();
+      el.click();
+      await sleep(50);
+
+      // Set the value using React-compatible approach:
+      // 1. Clear React's value tracker so it detects the change
+      const tracker = el._valueTracker;
+      if (tracker) { try { tracker.setValue(''); } catch (_) {} }
+
+      // 2. Use the native HTMLTextAreaElement setter to bypass React's synthetic event system
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (nativeSetter) {
+        nativeSetter.call(el, payload);
+      } else {
+        el.value = payload;
+      }
+
+      // 3. Dispatch events that React listens for to trigger state update
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+
+      // 4. Also fire React-specific InputEvent for frameworks that use inputType
+      try {
+        el.dispatchEvent(new InputEvent('input', {
+          inputType: 'insertText',
+          data: payload,
+          bubbles: true
+        }));
+      } catch (_) {}
+
       const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
 
-      // Re-focus and ensure value binding is active after user clicks send in preview dialog
+      // 5. Re-apply value in case React reset it during the confirmation
       el.focus();
-      insertTextProgrammatically(el, payload);
-      await sleep(350);
+      const trackerAgain = el._valueTracker;
+      if (trackerAgain) { try { trackerAgain.setValue(''); } catch (_) {} }
+      if (nativeSetter) {
+        nativeSetter.call(el, payload);
+      } else {
+        el.value = payload;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
 
+      // 6. Wait for React to render the Submit button (it only appears after text is detected)
+      await sleep(100);
+
+      // Grok uses aria-label="Submit" (not "Send")
       const grokSubmitSelectors = [
-        'button[aria-label*="Send"]',
+        'button[aria-label="Submit"]',
         'button[aria-label*="Submit"]',
-        'button[aria-label*="Grok"]',
+        'button[aria-label*="Send"]',
         'button[aria-label*="Ask"]',
-        'button[data-testid*="grok"]',
         'button[data-testid*="send"]',
         'button[data-testid*="submit"]',
-        'button[type="submit"]',
-        'form button[type="submit"]',
-        'button[class*="send"]',
-        'button[class*="submit"]',
-        'div[role="button"][aria-label*="Send"]',
-        'form button'
+        'button[type="submit"]'
       ].join(', ');
 
-      await trySubmit(el, grokSubmitSelectors);
+      // Retry finding submit button — it may take a moment for React to render it
+      let submitted = false;
+      for (let i = 0; i < 40; i++) {
+        const btn = document.querySelector(grokSubmitSelectors);
+        const isDisabled = btn && (btn.disabled || btn.getAttribute('aria-disabled') === 'true');
+        if (btn && !isDisabled) {
+          try {
+            btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+          } catch (_) {}
+          btn.click();
+          submitted = true;
+          break;
+        }
+        await sleep(80);
+      }
+
+      // Fallback: try Enter key if button was never found
+      if (!submitted) {
+        el.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
+        }));
+      }
+
       return { success: true };
     },
 
