@@ -2094,52 +2094,246 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
     },
 
     async gemini(prompt, contextId) {
-      const el = await waitForElement(
-        'rich-textarea div[contenteditable="true"], rich-textarea [contenteditable="true"], .ql-editor[contenteditable="true"], div[role="textbox"][contenteditable="true"], div[contenteditable="true"]'
-      );
+      // Gemini's actual DOM: <div role="textbox" aria-label="Enter a prompt for Gemini"
+      //   class="ql-editor textarea new-input-ui" contenteditable="true"> or <rich-textarea>
+      // Submit button: <button aria-label="Send message"> — renders after text is entered
+      const geminiInputSelectors = [
+        'rich-textarea div[contenteditable="true"]',
+        'div.ql-editor[contenteditable="true"]',
+        'div[role="textbox"][aria-label*="Gemini" i]',
+        'div[role="textbox"][aria-label*="prompt" i]',
+        'div[role="textbox"][contenteditable="true"]',
+        'div.ql-editor',
+        '[contenteditable="true"][data-placeholder*="message" i]',
+        'div[contenteditable="true"]'
+      ].join(', ');
+
+      const el = await waitForElement(geminiInputSelectors);
       if (!el) return { success: false, error: 'Gemini input not found' };
 
       const fileName = contextId ? `context-${contextId}.md` : 'context.md';
+      const file = new File([prompt], fileName, { type: 'text/markdown' });
+      let isFileAttached = false;
 
-      // 1. Reveal file input by triggering Gemini upload button if present
-      const uploadBtn = document.querySelector('button[aria-label*="Upload"], button[aria-label*="Add files"], button[aria-label*="file"], uploader-button, button[mattooltip*="Upload"]');
+      // ── Gemini File Upload Flow ──
+      // Step 1: Click the "Upload & tools" button to open the menu/sheet
+      const uploadBtn = document.querySelector([
+        'button[aria-label*="Upload" i]',
+        'button[aria-label*="Add" i]',
+        'button[aria-label*="Attach" i]',
+        'button[aria-label*="Insert" i]',
+        'button[aria-label*="tools" i]',
+        'button[aria-label*="plus" i]',
+        'button.uploader-button',
+        '[data-test-id="upload-button"]'
+      ].join(', '));
+
       if (uploadBtn) {
-        try { uploadBtn.click(); await sleep(250); } catch (_) {}
+        try {
+          uploadBtn.click();
+          await sleep(400);
+
+          // Step 2: Click the "Files" option inside the bottom sheet / menu
+          const fileOptionSelectors = [
+            'button[aria-label*="File" i]',
+            'button[data-test-id*="file" i]',
+            '[role="menuitem"][aria-label*="File" i]',
+            '.mdc-list-item',
+            'mat-list-item',
+            '.mat-mdc-menu-item',
+            'button[mattooltip*="File" i]'
+          ].join(', ');
+
+          let filesBtn = document.querySelector(fileOptionSelectors);
+          if (!filesBtn) {
+            const allBtns = document.querySelectorAll('button, [role="menuitem"], [role="option"], .mdc-list-item, mat-list-item, .mat-mdc-menu-item');
+            for (const b of allBtns) {
+              const txt = (b.textContent || '').trim().toLowerCase();
+              if (txt === 'files' || txt === 'file' || txt === 'upload file' || txt === 'upload files' || txt.includes('upload from computer')) {
+                filesBtn = b;
+                break;
+              }
+            }
+          }
+
+          if (filesBtn) {
+            filesBtn.click();
+            await sleep(500);
+          }
+
+          // Step 3: Wait for the dynamically-created <input type="file"> to appear
+          let fileInput = null;
+          for (let i = 0; i < 20; i++) {
+            fileInput = document.querySelector('input[type="file"]');
+            if (fileInput) break;
+            await sleep(100);
+          }
+
+          // Step 4: Attach the file via DataTransfer API
+          if (fileInput) {
+            try {
+              const dt = new DataTransfer();
+              dt.items.add(file);
+              fileInput.files = dt.files;
+              fileInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+              fileInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+              await sleep(500);
+
+              // Check if file chip appeared
+              const chipSel = 'uploader-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"], [class*="file-chip"], .file-upload-chip, [data-test-id*="file-chip"]';
+              const start = Date.now();
+              while (Date.now() - start < 2000) {
+                if (document.querySelector(chipSel)) {
+                  isFileAttached = true;
+                  break;
+                }
+                await sleep(100);
+              }
+            } catch (_) {}
+          }
+
+          // Close the menu if file wasn't attached
+          if (!isFileAttached) {
+            try {
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true
+              }));
+              await sleep(200);
+            } catch (_) {}
+          }
+        } catch (_) {}
       }
 
-      // 2. Attach Markdown file
-      const fileResult = await attachMarkdownFile(prompt, 'rich-textarea', fileName);
-      const isFileAttached = fileResult.success && (await waitForFileUploadComplete('gemini', 1200));
+      // Fallback 1: Try drag-and-drop onto the editor
+      if (!isFileAttached) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const dropTarget = el.closest('fieldset') || el.closest('rich-textarea') || el;
+          dropTarget.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          dropTarget.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          dropTarget.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          await sleep(800);
 
-      // 3. Choose payload: short companion message if native chip attached, otherwise formatted File Block
+          const chipSel = 'uploader-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"], [class*="file-chip"], .file-upload-chip';
+          if (document.querySelector(chipSel)) {
+            isFileAttached = true;
+          }
+        } catch (_) {}
+      }
+
+      // Fallback 2: Try direct attachMarkdownFile
+      if (!isFileAttached) {
+        const fileResult = await attachMarkdownFile(prompt, null, fileName);
+        if (fileResult.success) {
+          isFileAttached = await waitForFileUploadComplete('gemini', 1500);
+        }
+      }
+
+      // Choose payload (companion instruction if file chip attached, or full Markdown file block text if file chip wasn't created)
       const payload = isFileAttached
         ? getCompanionMessage(fileName, contextId)
         : formatFileBlockPayload(prompt, fileName, contextId);
 
-      // 4. Set formatted innerHTML for Gemini Angular contenteditable editor
-      el.focus();
-      try {
-        el.innerHTML = formatGeminiHtml(payload);
-      } catch (_) {
-        insertTextProgrammatically(el, payload);
-      }
+      // Helper function to insert text into Gemini Quill/contenteditable editor
+      const insertIntoGemini = (text) => {
+        el.focus();
+        try { el.click(); } catch (_) {}
 
-      dispatchInputEvents(el);
-      try {
-        const richTextarea = el.closest('rich-textarea');
-        if (richTextarea) dispatchInputEvents(richTextarea);
-      } catch (_) {}
+        // Select all to clear
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.execCommand('selectAll', false, null);
 
-      await sleep(200);
+        // First attempt: execCommand insertText
+        let success = document.execCommand('insertText', false, text);
 
-      // 5. Show preview confirmation overlay
+        // Second attempt: paste event via DataTransfer if execCommand failed
+        if (!success || !el.textContent.trim()) {
+          try {
+            const dt = new DataTransfer();
+            dt.setData('text/plain', text);
+            const pasteEvt = new ClipboardEvent('paste', {
+              clipboardData: dt,
+              bubbles: true,
+              cancelable: true
+            });
+            el.dispatchEvent(pasteEvt);
+          } catch (_) {}
+        }
+
+        // Third attempt: format HTML with <p> tags & remove ql-blank
+        if (!el.textContent.trim()) {
+          try {
+            el.innerHTML = formatGeminiHtml(text);
+            el.classList.remove('ql-blank');
+          } catch (_) {
+            el.innerText = text;
+          }
+        }
+
+        dispatchInputEvents(el);
+
+        // Additional Angular/Quill event dispatching on parent
+        try {
+          const parent = el.closest('fieldset') || el.closest('rich-textarea') || el.parentElement;
+          if (parent) {
+            parent.dispatchEvent(new Event('input', { bubbles: true }));
+            parent.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        } catch (_) {}
+      };
+
+      insertIntoGemini(payload);
+      await sleep(100);
+
       const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
-      await sleep(350);
 
-      // 6. Submit to Gemini
-      const submitSelectors = 'button.send-button, button[aria-label*="Send message"], button[aria-label*="Send prompt"], button[aria-label*="Send"], button[mattooltip*="Send"], button.send-button-container, [data-test-id="send-button"], button.submit-button';
-      await trySubmit(el, submitSelectors);
+      // Re-check and re-insert if content was cleared during confirmation modal
+      if (!el.textContent || !el.textContent.trim()) {
+        insertIntoGemini(payload);
+        await sleep(100);
+      }
+
+      // Wait for Submit button to appear and become enabled
+      const geminiSubmitSelectors = [
+        'button[aria-label="Send message"]',
+        'button[aria-label*="Send message" i]',
+        'button[aria-label*="Send prompt" i]',
+        'button[aria-label*="Send" i]',
+        'button.send-button',
+        'button[mattooltip*="Send" i]',
+        '[data-test-id="send-button"]',
+        '.send-button-container button'
+      ].join(', ');
+
+      let submitted = false;
+      for (let i = 0; i < 40; i++) {
+        const btn = document.querySelector(geminiSubmitSelectors);
+        const isDisabled = btn && (btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.classList.contains('disabled'));
+        if (btn && !isDisabled) {
+          try {
+            btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+          } catch (_) {}
+          btn.click();
+          submitted = true;
+          break;
+        }
+        await sleep(80);
+      }
+
+      // Fallback: Enter key
+      if (!submitted) {
+        el.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
+        }));
+      }
+
       return { success: true };
     },
 
