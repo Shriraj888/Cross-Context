@@ -1654,7 +1654,8 @@
       return { success: false, method: 'none', error: 'No file input found' };
     }
 
-    const file = new File([content], fileName, { type: 'text/markdown' });
+    // Use text/plain MIME type — some platforms (e.g. Gemini) reject text/markdown
+    const file = new File([content], fileName, { type: 'text/plain' });
 
     // Strategy 1: Find a visible <input type="file"> and set its files via DataTransfer
     for (const fileInput of fileInputs) {
@@ -2032,7 +2033,7 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
     const selectors = {
       claude: '[aria-label*="Attachment"], [class*="file-thumbnail"], [class*="attachment"], [data-testid*="file"]',
       chatgpt: '[data-testid="file-chip"], [class*="attachment-item"], [class*="file-"], [data-testid*="attachment"]',
-      gemini: 'uploader-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"]',
+      gemini: 'uploader-file-chip, upload-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"], [class*="file-chip"], [class*="uploaded-file"], mat-chip, .mat-mdc-chip',
       grok: '[class*="attachment"], [class*="file-chip"], [class*="file-"]',
       perplexity: '[class*="file-badge"], [class*="attachment"], [class*="file-"]'
     };
@@ -2112,41 +2113,97 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
       if (!el) return { success: false, error: 'Gemini input not found' };
 
       const fileName = contextId ? `context-${contextId}.md` : 'context.md';
-      const file = new File([prompt], fileName, { type: 'text/markdown' });
+      // Use text/plain — Gemini rejects text/markdown MIME type
+      const file = new File([prompt], fileName, { type: 'text/plain' });
       let isFileAttached = false;
 
+      // Chip selectors used to verify file attachment across all strategies
+      const chipSel = [
+        'uploader-file-chip',
+        'upload-file-chip',
+        '[class*="file-preview"]',
+        '[class*="attachment"]',
+        '[class*="upload-chip"]',
+        '[class*="file-chip"]',
+        '[class*="uploaded-file"]',
+        '.file-upload-chip',
+        '[data-test-id*="file-chip"]',
+        '[data-test-id*="file-preview"]',
+        'mat-chip',
+        '.mat-mdc-chip'
+      ].join(', ');
+
+      // Helper: poll for file chip appearance
+      const waitForChip = async (timeoutMs = 2500) => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          if (document.querySelector(chipSel)) return true;
+          await sleep(100);
+        }
+        return false;
+      };
+
       // ── Gemini File Upload Flow ──
-      // Step 1: Click the "Upload & tools" button to open the menu/sheet
-      const uploadBtn = document.querySelector([
+      // Step 1: Click the "Upload & tools" / "+" / "Add" button to open the menu/sheet
+      const uploadBtnSelectors = [
         'button[aria-label*="Upload" i]',
-        'button[aria-label*="Add" i]',
+        'button[aria-label*="Add file" i]',
+        'button[aria-label*="Add image" i]',
         'button[aria-label*="Attach" i]',
         'button[aria-label*="Insert" i]',
         'button[aria-label*="tools" i]',
         'button[aria-label*="plus" i]',
+        'button[aria-label*="Add" i]',
         'button.uploader-button',
-        '[data-test-id="upload-button"]'
-      ].join(', '));
+        '[data-test-id="upload-button"]',
+        '[data-test-id*="upload"]',
+        'button[mattooltip*="Upload" i]',
+        'button[mattooltip*="Add" i]'
+      ].join(', ');
+
+      const uploadBtn = document.querySelector(uploadBtnSelectors);
 
       if (uploadBtn) {
         try {
           uploadBtn.click();
-          await sleep(400);
+          await sleep(500);
 
-          // Step 2: Click the "Files" option inside the bottom sheet / menu
+          // Step 2: Click the "Files" / "Upload file" option inside the bottom sheet / menu
           const fileOptionSelectors = [
-            'button[aria-label*="File" i]',
+            'button[aria-label*="file" i]',
             'button[data-test-id*="file" i]',
-            '[role="menuitem"][aria-label*="File" i]',
+            '[role="menuitem"][aria-label*="file" i]',
+            '[role="menuitem"]',
             '.mdc-list-item',
             'mat-list-item',
             '.mat-mdc-menu-item',
-            'button[mattooltip*="File" i]'
+            '[role="listbox"] [role="option"]',
+            'button[mattooltip*="File" i]',
+            'mat-bottom-sheet button',
+            'mat-bottom-sheet [role="option"]',
+            '.cdk-overlay-container button',
+            '.cdk-overlay-container [role="menuitem"]'
           ].join(', ');
 
-          let filesBtn = document.querySelector(fileOptionSelectors);
+          let filesBtn = null;
+          // First: try direct selector match
+          const candidates = document.querySelectorAll(fileOptionSelectors);
+          for (const b of candidates) {
+            const txt = (b.textContent || b.getAttribute('aria-label') || '').trim().toLowerCase();
+            if (
+              txt === 'files' || txt === 'file' ||
+              txt === 'upload file' || txt === 'upload files' ||
+              txt.includes('upload from computer') ||
+              txt.includes('upload file') ||
+              txt.includes('my drive') === false && txt.includes('file')
+            ) {
+              filesBtn = b;
+              break;
+            }
+          }
+          // Second: broader text scan
           if (!filesBtn) {
-            const allBtns = document.querySelectorAll('button, [role="menuitem"], [role="option"], .mdc-list-item, mat-list-item, .mat-mdc-menu-item');
+            const allBtns = document.querySelectorAll('button, [role="menuitem"], [role="option"], .mdc-list-item, mat-list-item, .mat-mdc-menu-item, [role="listbox"] *');
             for (const b of allBtns) {
               const txt = (b.textContent || '').trim().toLowerCase();
               if (txt === 'files' || txt === 'file' || txt === 'upload file' || txt === 'upload files' || txt.includes('upload from computer')) {
@@ -2158,14 +2215,18 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
 
           if (filesBtn) {
             filesBtn.click();
-            await sleep(500);
+            await sleep(600);
           }
 
           // Step 3: Wait for the dynamically-created <input type="file"> to appear
           let fileInput = null;
-          for (let i = 0; i < 20; i++) {
-            fileInput = document.querySelector('input[type="file"]');
-            if (fileInput) break;
+          for (let i = 0; i < 30; i++) {
+            // Check all file inputs, prefer the most recently added one
+            const inputs = document.querySelectorAll('input[type="file"]');
+            if (inputs.length > 0) {
+              fileInput = inputs[inputs.length - 1]; // last one is typically the dynamic one
+              break;
+            }
             await sleep(100);
           }
 
@@ -2177,24 +2238,19 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
               fileInput.files = dt.files;
               fileInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
               fileInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-              await sleep(500);
 
-              // Check if file chip appeared
-              const chipSel = 'uploader-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"], [class*="file-chip"], .file-upload-chip, [data-test-id*="file-chip"]';
-              const start = Date.now();
-              while (Date.now() - start < 2000) {
-                if (document.querySelector(chipSel)) {
-                  isFileAttached = true;
-                  break;
-                }
-                await sleep(100);
-              }
+              isFileAttached = await waitForChip(3000);
             } catch (_) {}
           }
 
-          // Close the menu if file wasn't attached
+          // Close the menu/sheet if file wasn't attached
           if (!isFileAttached) {
             try {
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true
+              }));
+              await sleep(300);
+              // Try pressing Escape again in case of nested overlay
               document.dispatchEvent(new KeyboardEvent('keydown', {
                 key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true
               }));
@@ -2211,22 +2267,37 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
           dt.items.add(file);
           const dropTarget = el.closest('fieldset') || el.closest('rich-textarea') || el;
           dropTarget.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          await sleep(50);
           dropTarget.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          await sleep(50);
           dropTarget.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-          await sleep(800);
 
-          const chipSel = 'uploader-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"], [class*="file-chip"], .file-upload-chip';
-          if (document.querySelector(chipSel)) {
-            isFileAttached = true;
-          }
+          isFileAttached = await waitForChip(1500);
         } catch (_) {}
       }
 
-      // Fallback 2: Try direct attachMarkdownFile
+      // Fallback 2: Try clipboard paste of the file into the editor
+      if (!isFileAttached) {
+        try {
+          el.focus();
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const pasteEvt = new ClipboardEvent('paste', {
+            clipboardData: dt,
+            bubbles: true,
+            cancelable: true
+          });
+          el.dispatchEvent(pasteEvt);
+
+          isFileAttached = await waitForChip(1500);
+        } catch (_) {}
+      }
+
+      // Fallback 3: Try direct attachMarkdownFile (scans for any existing file inputs)
       if (!isFileAttached) {
         const fileResult = await attachMarkdownFile(prompt, null, fileName);
         if (fileResult.success) {
-          isFileAttached = await waitForFileUploadComplete('gemini', 1500);
+          isFileAttached = await waitForFileUploadComplete('gemini', 2000);
         }
       }
 
@@ -2953,7 +3024,7 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}${transcriptSection}`;
+${handoff}`;
       }
 
       if (dominantIntent === 'debugging') {
@@ -2981,7 +3052,7 @@ ${bulletJoin(e.failed_attempts)}
 ${bulletJoin(e.successful_solutions)}
 
 🚀 Please continue from:
-${handoff}${transcriptSection}`;
+${handoff}`;
       }
 
       if (dominantIntent === 'brainstorming') {
@@ -3012,7 +3083,7 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}${transcriptSection}`;
+${handoff}`;
       }
 
       if (dominantIntent === 'research') {
@@ -3040,7 +3111,7 @@ ${bulletJoin(e.user_preferences)}
 - Knowledge Goal: ${intent}
 
 🚀 Please continue from:
-${handoff}${transcriptSection}`;
+${handoff}`;
       }
 
       if (dominantIntent === 'writing') {
@@ -3052,7 +3123,7 @@ ${idTag}I was drafting and composing text with ${src}. Here is where we left off
 - Referenced Documents: ${files || 'None recorded'}
 
 💡 Synthesized ideas & guidelines:
-${bulletJoin(e.deduplicated_context)}
+${bulletJoin(e.detailed_context || e.deduplicated_context)}
 
 ⚙️ My style preferences:
 ${bulletJoin(e.user_preferences)}
@@ -3065,7 +3136,7 @@ ${bulletJoin(e.user_preferences)}
 ${pending}
 
 🚀 Please continue from:
-${handoff}${transcriptSection}`;
+${handoff}`;
       }
 
       // General fallback
@@ -3090,237 +3161,26 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}${transcriptSection}`;
+${handoff}`;
     }
 
     // ──────────────────────────────────────────────────────────────
-    // DETERMINISTIC FALLBACK — Run Memory Graph & Deduplication Engine locally
+    // STANDARD FALLBACK — Raw Conversation Handoff
     // ──────────────────────────────────────────────────────────────
-    class LocalContextIntelligenceEngine {
-      constructor() {
-        this.nodes = new Map();
-        this.edges = [];
-        this.priorityMemories = [];
-        this.executionContext = {
-          topicsDiscussed: new Set(),
-          solvedProblems: new Set(),
-          failedApproaches: new Set(),
-          currentFocus: ''
-        };
-      }
-
-      scoreMessage(content, role) {
-        if (!content) return 0;
-        const hasCode = content.includes('```');
-        const highPatterns = [
-          /requirement/i, /architecture/i, /technical decision/i, /tech stack/i,
-          /todo/i, /active task/i, /unresolved/i, /error/i, /bug/i, /exception/i,
-          /debugging/i, /blocker/i, /user preference/i, /conventions/i, /decision/i,
-          /how to/i, /solves/i, /fails/i, /attempt/i, /config/i
-        ];
-        const lowPatterns = [
-          /^hello/i, /^hi /i, /^hey/i, /thanks/i, /thank you/i, /awesome/i,
-          /perfect/i, /ok/i, /confirm/i, /^yes$/i, /filler/i, /conversation fluff/i,
-          /helpful assistant/i
-        ];
-        let score = 5;
-        if (role === 'user') score += 1;
-        if (hasCode) score += 3;
-        let highMatchCount = 0;
-        highPatterns.forEach(pat => { if (pat.test(content)) highMatchCount++; });
-        score += Math.min(highMatchCount * 1.5, 4);
-        let lowMatchCount = 0;
-        lowPatterns.forEach(pat => { if (pat.test(content)) lowMatchCount++; });
-        score -= Math.min(lowMatchCount * 2, 4);
-        return Math.max(1, Math.min(10, Math.round(score)));
-      }
-
-      calculateJaccard(str1, str2) {
-        const getWords = (str) => new Set(str.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2));
-        const set1 = getWords(str1);
-        const set2 = getWords(str2);
-        if (set1.size === 0 || set2.size === 0) return 0;
-        let intersection = 0;
-        for (const item of set1) { if (set2.has(item)) intersection++; }
-        const union = set1.size + set2.size - intersection;
-        return intersection / union;
-      }
-
-      deduplicateItems(items) {
-        const canonicalList = [];
-        items.forEach(item => {
-          if (!item || item.trim().length < 5) return;
-          let merged = false;
-          for (let i = 0; i < canonicalList.length; i++) {
-            const canonical = canonicalList[i];
-            const similarity = this.calculateJaccard(item, canonical);
-            const isSub1 = item.toLowerCase().includes(canonical.toLowerCase()) && item.length < canonical.length * 2;
-            const isSub2 = canonical.toLowerCase().includes(item.toLowerCase()) && canonical.length < item.length * 2;
-            if (similarity > 0.45 || isSub1 || isSub2) {
-              if (item.length > canonical.length) { canonicalList[i] = item; }
-              merged = true;
-              break;
-            }
-          }
-          if (!merged) { canonicalList.push(item); }
-        });
-        return canonicalList;
-      }
-
-      addNode(id, type, label, properties = {}) {
-        if (!this.nodes.has(id)) { this.nodes.set(id, { type, label, properties }); }
-      }
-
-      addEdge(from, to, type) {
-        const exists = this.edges.some(e => e.from === from && e.to === to && e.type === type);
-        if (!exists && this.nodes.has(from) && this.nodes.has(to)) { this.edges.push({ from, to, type }); }
-      }
-
-      processConversation(messages) {
-        let messageIndex = 0;
-        this.addNode('project_root', 'PROJECT', 'Active Working Project', { description: 'Target transfer workspace' });
-
-        messages.forEach(msg => {
-          const content = msg.content || '';
-          const role = msg.role || 'user';
-          const score = this.scoreMessage(content, role);
-          const msgId = `msg_${messageIndex++}`;
-
-          if (content.toLowerCase().includes('solved') || content.toLowerCase().includes('fixed') || content.toLowerCase().includes('working now')) {
-            const sentenceMatch = content.match(/[^.!?]*?(?:solved|fixed)[^.!?]*/i);
-            if (sentenceMatch) this.executionContext.solvedProblems.add(sentenceMatch[0].trim());
-          }
-          if (content.toLowerCase().includes('avoid') || content.toLowerCase().includes('failed') || content.toLowerCase().includes('do not repeat')) {
-            const sentenceMatch = content.match(/[^.!?]*?(?:avoid|failed)[^.!?]*/i);
-            if (sentenceMatch) this.executionContext.failedApproaches.add(sentenceMatch[0].trim());
-          }
-
-          if (score >= 6) {
-            this.priorityMemories.push({
-              content: content.length > 150 ? content.substring(0, 150) + '...' : content,
-              priority_score: score,
-              priority_reason: role === 'user' ? 'Direct user requirement' : 'Developer instructions'
-            });
-          }
-
-          const techKeywords = ['react', 'next.js', 'node', 'vue', 'chrome extension', 'javascript', 'typescript', 'rust', 'actix-web', 'sqlx', 'css', 'vanilla css', 'flexbox', 'html', 'gemini', 'gemini api', 'tailwind'];
-          techKeywords.forEach(tech => {
-            if (content.toLowerCase().includes(tech)) {
-              const techId = `tech_${tech.replace(/\s+/g, '_')}`;
-              this.addNode(techId, 'TECH_STACK', tech.toUpperCase(), { name: tech });
-              this.addEdge(techId, 'project_root', 'IMPLEMENTED_WITH');
-              this.executionContext.topicsDiscussed.add(tech);
-            }
-          });
-
-          if (content.toLowerCase().includes('todo') || content.toLowerCase().includes('task') || content.toLowerCase().includes('objective')) {
-            const sentences = content.split(/[.!?\n]/);
-            sentences.forEach((s, idx) => {
-              if (s.toLowerCase().includes('todo') || s.toLowerCase().includes('task') || s.toLowerCase().includes('objective')) {
-                const taskId = `${msgId}_task_${idx}`;
-                const cleanLabel = s.replace(/[-*•]/g, '').trim();
-                if (cleanLabel.length > 10) {
-                  this.addNode(taskId, 'TASK', cleanLabel, { status: 'active' });
-                  this.addEdge(taskId, 'project_root', 'DEPENDS_ON');
-                }
-              }
-            });
-          }
-
-          if (content.toLowerCase().includes('decided') || content.toLowerCase().includes('let\'s use') || content.toLowerCase().includes('we will use')) {
-            const sentences = content.split(/[.!?\n]/);
-            sentences.forEach((s, idx) => {
-              if (s.toLowerCase().includes('decided') || s.toLowerCase().includes('use')) {
-                const decId = `${msgId}_dec_${idx}`;
-                const cleanLabel = s.replace(/[-*•]/g, '').trim();
-                if (cleanLabel.length > 10) {
-                  this.addNode(decId, 'DECISION', cleanLabel);
-                  this.addEdge(decId, 'project_root', 'RELATED_TO');
-                }
-              }
-            });
-          }
-
-          if (content.toLowerCase().includes('error') || content.toLowerCase().includes('bug') || content.toLowerCase().includes('fail')) {
-            const sentences = content.split(/[.!?\n]/);
-            sentences.forEach((s, idx) => {
-              if (s.toLowerCase().includes('error') || s.toLowerCase().includes('bug') || s.toLowerCase().includes('fail')) {
-                const issueId = `${msgId}_issue_${idx}`;
-                const cleanLabel = s.replace(/[-*•]/g, '').trim();
-                if (cleanLabel.length > 10) {
-                  this.addNode(issueId, 'ISSUE', cleanLabel);
-                  this.addEdge(issueId, 'project_root', 'BLOCKED_BY');
-                }
-              }
-            });
-          }
-        });
-
-        const rawMemories = this.priorityMemories.map(m => m.content);
-        const dedupedMemories = this.deduplicateItems(rawMemories);
-        this.priorityMemories = this.priorityMemories.filter(m => dedupedMemories.includes(m.content));
-      }
-
-      getStructuredPacket() {
-        return {
-          system_context: 'Deterministic State Restoration & Continuity Protocol — Version 2.0',
-          priority_memory: this.priorityMemories.map(m => `[Score ${m.priority_score}/10] ${m.content}`).slice(0, 8),
-          active_tasks: Array.from(this.nodes.values()).filter(n => n.type === 'TASK').map(n => n.label),
-          unresolved_issues: Array.from(this.nodes.values()).filter(n => n.type === 'ISSUE').map(n => n.label),
-          important_decisions: Array.from(this.nodes.values()).filter(n => n.type === 'DECISION').map(n => n.label),
-          execution_context: {
-            topics_discussed: Array.from(this.executionContext.topicsDiscussed),
-            problems_solved: Array.from(this.executionContext.solvedProblems),
-            approaches_to_avoid: Array.from(this.executionContext.failedApproaches),
-            current_focus: Array.from(this.nodes.values()).filter(n => n.type === 'TASK').map(n => n.label)[0] || 'General System Implementation'
-          },
-          user_preferences: Array.from(this.nodes.values()).filter(n => n.type === 'PREFERENCE').map(n => n.label)
-        };
-      }
-    }
-
-    const localEngine = new LocalContextIntelligenceEngine();
-    localEngine.processConversation(context.messages);
-    const packet = localEngine.getStructuredPacket();
-
-    const src = PLATFORM_NAMES[context.platform] || context.platform;
-    const firstUser = context.messages.find(m => m.role === 'user');
+    const src = srcName;
+    const firstUser = Array.isArray(context.messages) ? context.messages.find(m => m.role === 'user') : null;
     const handoffHint = firstUser ? firstUser.content : 'Continue active working session';
     const handoffTruncated = handoffHint.length > 300 ? handoffHint.substring(0, 300) + '...' : handoffHint;
 
     return `[🔄 Cross Context Transfer — State Restoration Briefing]
 ${idTag}I was working on a project with ${src}. Here is where we left off:
 
-⚙️ What I was building:
-- System Context: ${packet.system_context}
-- Active Execution Context:
-  - Current Focus Area: ${packet.execution_context.current_focus}
-  - Core Topics Discussed: ${packet.execution_context.topics_discussed.join(', ') || 'None'}
-  - Solved Problems & Closed Issues:
-${packet.execution_context.problems_solved.map(p => `  ✓ ${p}`).join('\n') || '  None'}
-  - Failed Approaches to Avoid:
-${packet.execution_context.approaches_to_avoid.map(a => `  ⚠️ ${a}`).join('\n') || '  None'}
-
-🧠 Distilled priority specifications:
-${packet.priority_memory.map(m => `• ${m}`).join('\n') || 'None recorded'}
-
-🔑 Key decisions made so far:
-${packet.important_decisions.map(d => `• ${d}`).join('\n') || 'None recorded'}
-
-❌ What I was stuck on (Unresolved Issues):
-${packet.unresolved_issues.map(i => `• ${i}`).join('\n') || 'None active'}
-
-⚙️ My preferences:
-${packet.user_preferences.map(p => `• ${p}`).join('\n') || 'None configured'}
-
-🎯 Tasks I was working on:
-${packet.active_tasks.map(t => `[ ] ${t}`).join('\n') || 'No pending tasks'}
-
-🚀 Please continue from:
+🚀 Recent Focus / Context:
 ${handoffTruncated}
+${transcriptSection}
 
 ---
-Please acknowledge these details. Tell me what tasks you are taking over, and ask me what we should focus on next to continue seamlessly.${transcriptSection}`;
+Please acknowledge these details. Tell me what tasks you are taking over, and ask me what we should focus on next to continue seamlessly.`;
   }
 
   // ════════════════════════════════════════════

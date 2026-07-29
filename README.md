@@ -30,7 +30,7 @@ In the current era of LLM utility, developers and power users operate in a multi
 
 However, users are constantly bottlenecked by platform specific restrictions such as free-tier usage caps, context window limits, conversation truncation, and vendor lock-in. When a limit is hit, migrating a session to another platform is painful. It requires manual parsing, copying text fragments, re-explaining architectural rules, re-uploading file trees, and re-pasting error logs. 
 
-Cross Context addresses this gap. It serves as a local, privacy-first context portability layer. It reads the current session's DOM, filters out interface noise, constructs a deterministic memory graph, compresses low-priority turns, and generates a structured handoff prompt. This prompt is then dynamically injected into the target platform's input field, allowing the conversation to continue with zero friction.
+Cross Context addresses this gap. It serves as a local, privacy-first context portability layer. It reads the current session's DOM, filters out interface noise, compresses low-priority turns, and generates a structured handoff prompt. This prompt is then dynamically injected into the target platform's input field, allowing the conversation to continue with zero friction.
 
 ---
 
@@ -63,7 +63,7 @@ The long-term goal of Cross Context is to establish a **universal context layer*
 * **Upload Readiness Polling (`waitForFileUploadComplete`)**: Actively monitors host platform DOM attachment chips (`[data-testid="file-chip"]`, `uploader-file-chip`, etc.) to verify file attachments finish uploading before typing companion text or submitting.
 * **Sequential Context ID System (`con_01`, `con_02`...)**: Generates human-friendly sequential Context IDs for clear context tracking, file naming, and multi-session management.
 * **Multi-Session AI System Instructions**: Embeds explicit system instructions (`> ⚠️ SYSTEM INSTRUCTION FOR RECEIVING AI MODEL...`) and prompt companion text (`(Context ID: con_01)`) to prevent target LLMs from confusing or merging memory states across different context files.
-* **Multi-Context Session Merger**: Allows selecting multiple saved contexts (`con_01` + `con_02`) and synthesizing them into a new unified context session (`con_03`) combining transcripts, memory graphs, tech stacks, and architectural decisions.
+* **Multi-Context Session Merger**: Allows selecting multiple saved contexts (`con_01` + `con_02`) and synthesizing them into a new unified context session (`con_03`) combining transcripts, tech stacks, and architectural decisions.
 * **Estimated Token Counter & Model Fit Badge**: Calculates real-time estimated tokens (`Math.ceil(length / 4)`) and renders color-coded compatibility badges (`⚡ ~2.4k tokens`) inside the `context.md Preview` card.
 * **`context.md Preview` Modal Component**: Dedicated preview tab in the Chrome extension popup displaying a file header card, Context ID badge, Copy Markdown button, Download `.md` button, and dark code viewer.
 * **Visual Attachment Mode Badges**: Renders prominent glowing badges (`📄 Attached context-con_01.md` vs `📝 Text Paste Fallback`) in the floating preview overlay on target pages.
@@ -72,7 +72,6 @@ The long-term goal of Cross Context is to establish a **universal context layer*
 * **AI-Enhanced Summarization**: Optional integration with Gemini's API to distill long transcripts into dense, high-level developer specifications.
 * **Deterministic Context Scoring**: Local heuristic algorithm that rates messages based on information density (errors, requirements, decisions, code vs fluff).
 * **Concept Deduplication**: Algorithmic deduplication using Jaccard similarity metrics to prevent repeating code blocks or redundant instructions.
-* **Memory-Graph Generation**: Builds a local relationship network (nodes and edges) tracking tasks, tech stack, decisions, and bugs.
 * **One-Click Handoff & Injection**: Automated workflow that opens the target platform, waits for DOM readiness, and programmatically injects the structured state file and companion text.
 * **Dynamic Scroll-to-Load**: Heuristic viewport controller that scroll-loads virtualized lists in long chat logs to capture full conversation history.
 * **Base64 Media Extraction**: Detects, fetches, bypasses CORS, compresses, and base64-encodes SVGs and images within the conversation to preserve visual context.
@@ -202,7 +201,7 @@ graph TD
 4. **DOM Extraction**: Content script queries message nodes using priority selectors, filtering navigation bars and textboxes.
 5. **Markdown Reconstruction**: The HTML nodes are translated into clean Markdown, preserving tables, code blocks, lists, and formatting.
 6. **Media Optimization**: SVG assets are rendered to Canvas and compiled into PNG data URIs. Inline image URLs are retrieved via the background proxy, optimized to 1024px JPEG, and converted to base64.
-7. **Graph Generation & Deduplication**: The context intelligence engine builds a local memory graph and runs Jaccard similarity metrics to strip repeating code or text.
+7. **Deduplication & Formatting**: The context formatting engine runs Jaccard similarity metrics to strip repeating code or text and builds a structured handoff briefing.
 8. **Handoff Packaging & ID Assignment**: A context snapshot is created and assigned a sequential Context ID (e.g. `con_01`). A complete, structured Markdown file (`context-con_01.md`) containing metadata, AI system instructions, project briefing, and full conversation transcript is saved to local storage.
 9. **Target Launch**: The background script opens a tab loading the user-chosen target LLM.
 10. **Target Injection & File Attachment**: Upon tab load completion, the injection engine locates the uploader, creates an in-memory `File` (`context-con_01.md`), and attaches it via the `DataTransfer` API and drag-and-drop simulation. It then types a companion instruction in the text input box referencing `(Context ID: con_01)`.
@@ -215,7 +214,7 @@ graph TD
 The context engineering module handles optimization and compression to ensure the transfer prompt is highly effective and fits easily within typical LLM system contexts.
 
 ### Priority Heuristics
-The local `ContextIntelligenceEngine` runs a keyword classifier on every scraped turn:
+The local context engine runs a keyword classifier on every scraped turn:
 
 * **High-Priority Match (Score +1.5 to +3.0)**: Matches patterns: `requirement`, `architecture`, `technical decision`, `todo`, `unresolved`, `error`, `bug`, `config`, or code blocks (` ``` `).
 * **Low-Priority Match (Score -2.0)**: Matches patterns: `hello`, `hi`, `thank you`, `awesome`, `fluff`, or basic affirmations like `ok`, `yes`.
@@ -227,70 +226,6 @@ To prevent transferring multiple versions of a file that was iteratively debugge
 $$J(A, B) = \frac{|A \cap B|}{|A \cup B|}$$
 
 For any two text fragments $A$ and $B$, the engine splits the strings into sets of words (minimum length of 3 characters, ignoring case and symbols). If the similarity index exceeds `0.45`, or if one fragment is a substring inclusion of the other, the shorter version is discarded. This keeps only the most complete, updated code or architectural instructions in the packet.
-
-### Memory Graph Assembly & Selective Context Retrieval
-
-To prune prompt volume and maximize the target LLM's attention span, Cross Context implements an advanced **Memory Graph Selective Context Retrieval** engine in `utils/formatter.js`:
-
-* **Nodes**: Entity representations of state. Types include `PROJECT` (the root project context), `TECH_STACK` (detected technologies), `TASK` (active checklist/todo items), `DECISION` (architectural/design selections), `ISSUE` (bugs and unresolved exceptions), and `PREFERENCE` (explicit user styling/coding conventions).
-* **Edges**: Directed semantic relationships, such as `IMPLEMENTED_WITH`, `DEPENDS_ON`, `BLOCKED_BY`, `RELATED_TO`, and `INFLUENCED_BY`.
-
-```mermaid
-graph TD
-    classDef root fill:#334155,stroke:#475569,stroke-width:2px,color:#fff;
-    classDef tech fill:#1e3a8a,stroke:#3b82f6,stroke-width:1px,color:#fff;
-    classDef task fill:#14532d,stroke:#22c55e,stroke-width:1px,color:#fff;
-    classDef issue fill:#7f1d1d,stroke:#ef4444,stroke-width:1px,color:#fff;
-    classDef dec fill:#701a75,stroke:#d946ef,stroke-width:1px,color:#fff;
-
-    Root["project_root: PROJECT"]:::root
-    
-    %% Semantic Cluster 1 (Turn 1: Setup React & RTK)
-    TechReact["tech_react: TECH_STACK - React"]:::tech
-    TechRedux["tech_redux: TECH_STACK - Redux"]:::tech
-    DecRTK["dec_rtk: DECISION - Use Redux Toolkit"]:::dec
-    
-    Root -->|IMPLEMENTED_WITH| TechReact
-    Root -->|IMPLEMENTED_WITH| TechRedux
-    Root -->|RELATED_TO| DecRTK
-    
-    %% Clustering Turn 1
-    TechReact <-->|RELATED_TO| DecRTK
-    TechRedux <-->|RELATED_TO| DecRTK
-    TechReact <-->|RELATED_TO| TechRedux
-    
-    %% Semantic Cluster 2 (Turn 2: State mismatch issue in store.js)
-    IssueMismatch["issue_mismatch: ISSUE - TypeError at store.js:24"]:::issue
-    TaskFixMismatch["task_fix: TASK - Fix state mismatch"]:::task
-    
-    Root -->|BLOCKED_BY| IssueMismatch
-    Root -->|DEPENDS_ON| TaskFixMismatch
-    
-    %% Clustering Turn 2
-    IssueMismatch <-->|RELATED_TO| TaskFixMismatch
-    
-    %% Cross-Links between clusters
-    IssueMismatch -.->|RELATED_TO| TechRedux
-    TaskFixMismatch -.->|RELATED_TO| TechRedux
-    
-    %% BFS Traversal Visualization
-    subgraph "2-Hop BFS Subgraph (Focus: TypeError)"
-        IssueMismatch
-        TaskFixMismatch
-        TechRedux
-        DecRTK
-    end
-    
-    %% Hub-Bypass
-    style Root stroke-dasharray: 5 5;
-    linkStyle 0,1,2,3,4 stroke:#cbd5e1,stroke-width:1px;
-    linkStyle 5,6,7,8 stroke:#22c55e,stroke-width:2px;
-```
-
-#### Core Context Retrieval Pillars:
-1. **Local Semantic Clustering**: During turn-by-turn parsing, all nodes extracted within the exact same message exchanges are grouped into turn-level semantic clusters and fully interconnected with bidirectional `RELATED_TO` edges, locking their context together.
-2. **Hub-Bypass BFS Traversal**: During retrieval, a 2-hop BFS traverses from the active focal point to fetch relevant nodes. Standard star-graph BFS would travel through `project_root` to all sibling clusters (leaking the entire conversation). By implementing a strict **Hub-Bypass rule** (`if (id === 'project_root') continue;`), traversal through the central root hub is blocked, confining retrieval to the targeted, relevant local sub-graph cluster.
-3. **Focal Filtering for Prompts**: The engine scans back-to-front to identify the most recent `TASK` or unresolved `ISSUE` node to establish as the "current focus node". It triggers the 2-hop BFS on this focus node and dynamically prunes the deterministic fallback prompt's lists (active tasks, decisions, issues, tech stack, preferences) to contain only the nodes retrieved in the sub-graph, eliminating token noise.
 
 ---
 
@@ -394,7 +329,7 @@ To eliminate semantic drift and ensure high accuracy under complex schema proper
    - A concise context `title` (max 6-8 words)
    - A grounded `project_summary` and `current_task`
    - An optimized `handoffPrompt` constructed in the **first-person user voice** (e.g., *"I was working on X. Here is the state... please continue by..."*), avoiding robotic third-person meta-context.
-4. **Structured Integration**: The service worker merges synthesized properties and extracted facts into a unified schema payload. This maintains 100% backward-compatibility with downstream UI components, memory graph models, and tab injectors.
+4. **Structured Integration**: The service worker merges synthesized properties and extracted facts into a unified schema payload. This maintains 100% backward-compatibility with downstream UI components and tab injectors.
 
 ---
 
@@ -438,7 +373,7 @@ cross-context/
 │   ├── popup.css              # Custom styled popup window CSS
 │   └── popup.js               # Event handlers and local state controllers for UI
 └── utils/                     # Common utility modules
-    ├── formatter.js           # Memory graph logic, heuristics, and prompt formatters
+    ├── formatter.js           # Prompt formatters, heuristic logic, and context helpers
     └── storage.js             # Local Chrome storage wrappers
 ```
 
@@ -476,7 +411,7 @@ Since the extension is under development, load it locally using Developer Mode:
  │ - React frontend              │   Transfer   │ Injected handoff prompt:      │
  │ - Redux state mismatch        │ ───────────> │ - Target file: store.js       │
  │ - Active bug in store.js      │              │ - Error log: TypeError...     │
- │ - Attempted solution failed   │              │ - Reconstructed memory graph  │
+ │ - Attempted solution failed   │              │ - Restored state briefing     │
  └───────────────────────────────┘              └───────────────────────────────┘
 ```
 

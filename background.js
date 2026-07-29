@@ -1,8 +1,6 @@
 // Cross Context — Background Service Worker
 // Handles messaging between popup and content scripts
 
-import { ContextIntelligenceEngine } from './utils/formatter.js';
-
 const MAX_SAVED_CONTEXTS = 10;
 const MAX_IMAGE_FETCH_BYTES = 2 * 1024 * 1024;
 const IMAGE_FETCH_TIMEOUT_MS = 12000;
@@ -46,13 +44,6 @@ async function handleSaveContext(context, sendResponse) {
     const hasKey = !!geminiApiKey;
     const isAiEnabled = aiEnhancementEnabled !== false; // default to true if key is present
 
-    const engine = new ContextIntelligenceEngine();
-    engine.processConversation(context.messages);
-    const memoryGraph = {
-      nodes: Array.from(engine.nodes.entries()).map(([id, node]) => ({ id, ...node })),
-      edges: engine.edges
-    };
-
     const newContext = {
       id: generateId(contexts),
       platform: context.platform,
@@ -62,7 +53,6 @@ async function handleSaveContext(context, sendResponse) {
       timestamp: Date.now(),
       url: context.url || '',
       aiStatus: (isAiScrape && hasKey && isAiEnabled) ? 'pending' : 'idle',
-      memoryGraph: memoryGraph,
     };
 
     // Prepend new context, keep only MAX_SAVED_CONTEXTS
@@ -246,111 +236,7 @@ async function handleScrapeRequest(message, sendResponse) {
   }
 }
 
-function augmentMemoryGraph(memoryGraph, aiEnhanced) {
-  if (!memoryGraph || !memoryGraph.nodes) {
-    memoryGraph = { nodes: [], edges: [] };
-  }
 
-  // 1. Remove existing local rough TASK, DECISION, ISSUE, PREFERENCE nodes to replace them with AI-distilled ones
-  if (Array.isArray(aiEnhanced.pending_tasks) && aiEnhanced.pending_tasks.length > 0) {
-    memoryGraph.nodes = memoryGraph.nodes.filter(n => n.type !== 'TASK');
-    memoryGraph.edges = memoryGraph.edges.filter(e => !e.from.includes('_task_') && !e.to.includes('_task_') && !e.from.startsWith('ai_task_') && !e.to.startsWith('ai_task_'));
-  }
-  if (Array.isArray(aiEnhanced.architecture_decisions) && aiEnhanced.architecture_decisions.length > 0) {
-    memoryGraph.nodes = memoryGraph.nodes.filter(n => n.type !== 'DECISION');
-    memoryGraph.edges = memoryGraph.edges.filter(e => !e.from.includes('_dec_') && !e.to.includes('_dec_') && !e.from.startsWith('ai_dec_') && !e.to.startsWith('ai_dec_'));
-  }
-  if (Array.isArray(aiEnhanced.errors_and_issues) && aiEnhanced.errors_and_issues.length > 0) {
-    memoryGraph.nodes = memoryGraph.nodes.filter(n => n.type !== 'ISSUE');
-    memoryGraph.edges = memoryGraph.edges.filter(e => !e.from.includes('_issue_') && !e.to.includes('_issue_') && !e.from.startsWith('ai_issue_') && !e.to.startsWith('ai_issue_'));
-  }
-  if (Array.isArray(aiEnhanced.user_preferences) && aiEnhanced.user_preferences.length > 0) {
-    memoryGraph.nodes = memoryGraph.nodes.filter(n => n.type !== 'PREFERENCE');
-    memoryGraph.edges = memoryGraph.edges.filter(e => !e.from.startsWith('ai_pref_') && !e.to.startsWith('ai_pref_'));
-  }
-
-  // Helper to check if node exists
-  const hasNode = (id) => memoryGraph.nodes.some(n => n.id === id);
-  // Helper to add node
-  const addNode = (id, type, label, properties = {}) => {
-    if (!hasNode(id)) {
-      memoryGraph.nodes.push({ id, type, label, properties });
-    }
-  };
-  // Helper to add edge
-  const addEdge = (from, to, type) => {
-    const exists = memoryGraph.edges.some(e => e.from === from && e.to === to && e.type === type);
-    const hasFrom = hasNode(from);
-    const hasTo = hasNode(to);
-    if (!exists && hasFrom && hasTo) {
-      memoryGraph.edges.push({ from, to, type });
-    }
-  };
-
-  // Ensure project_root is present
-  addNode('project_root', 'PROJECT', 'Active Working Project', { description: 'Target transfer workspace' });
-
-  // 2. Add Technical Stack
-  if (Array.isArray(aiEnhanced.technical_stack)) {
-    aiEnhanced.technical_stack.forEach(tech => {
-      const techId = `tech_${tech.toLowerCase().replace(/\s+/g, '_')}`;
-      addNode(techId, 'TECH_STACK', tech, { name: tech });
-      addEdge(techId, 'project_root', 'IMPLEMENTED_WITH');
-    });
-  }
-
-  // 3. Add Architecture Decisions
-  if (Array.isArray(aiEnhanced.architecture_decisions)) {
-    aiEnhanced.architecture_decisions.forEach((dec, idx) => {
-      const decId = `ai_dec_${idx}`;
-      addNode(decId, 'DECISION', dec);
-      addEdge(decId, 'project_root', 'RELATED_TO');
-    });
-  }
-
-  // 4. Add Pending Tasks
-  if (Array.isArray(aiEnhanced.pending_tasks)) {
-    aiEnhanced.pending_tasks.forEach((task, idx) => {
-      const taskId = `ai_task_${idx}`;
-      addNode(taskId, 'TASK', task, { status: 'active' });
-      addEdge(taskId, 'project_root', 'DEPENDS_ON');
-    });
-  }
-
-  // 5. Add Errors and Issues
-  if (Array.isArray(aiEnhanced.errors_and_issues)) {
-    aiEnhanced.errors_and_issues.forEach((err, idx) => {
-      const issueId = `ai_issue_${idx}`;
-      addNode(issueId, 'ISSUE', err);
-      addEdge(issueId, 'project_root', 'BLOCKED_BY');
-    });
-  }
-
-  // 6. Add User Preferences
-  if (Array.isArray(aiEnhanced.user_preferences)) {
-    aiEnhanced.user_preferences.forEach((pref, idx) => {
-      const prefId = `ai_pref_${idx}`;
-      addNode(prefId, 'PREFERENCE', pref);
-      addEdge(prefId, 'project_root', 'INFLUENCED_BY');
-    });
-  }
-
-  // 7. Add connections from Tasks/Issues/Decisions to Tech Stack if mentions exist
-  memoryGraph.nodes.forEach(node => {
-    if (node.type === 'TASK' || node.type === 'ISSUE' || node.type === 'DECISION') {
-      memoryGraph.nodes.forEach(techNode => {
-        if (techNode.type === 'TECH_STACK') {
-          const techName = techNode.properties.name.toLowerCase();
-          if (node.label.toLowerCase().includes(techName)) {
-            addEdge(node.id, techNode.id, 'RELATED_TO');
-          }
-        }
-      });
-    }
-  });
-
-  return memoryGraph;
-}
 
 function generateId(existingContexts = []) {
   let maxNum = 0;
@@ -849,9 +735,7 @@ ${JSON.stringify(pass1ParsedResult, null, 2)}
       updatedContexts[idx].aiStatus = 'success';
       updatedContexts[idx].title = parsedResult.title || updatedContexts[idx].title;
       
-      // Augment memory graph with AI-distilled tags
-      const existingGraph = updatedContexts[idx].memoryGraph;
-      updatedContexts[idx].memoryGraph = augmentMemoryGraph(existingGraph, parsedResult);
+
 
       updatedContexts[idx].aiEnhanced = {
         // Base mapping to keep old simple visual interfaces safe

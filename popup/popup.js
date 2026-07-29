@@ -1,7 +1,7 @@
 // Cross Context — Popup Script
 'use strict';
 
-import { ContextIntelligenceEngine, formatContextPrompt } from '../utils/formatter.js';
+import { formatContextPrompt } from '../utils/formatter.js';
 
 // ──────────────────────────────────────────
 // Platform Configuration
@@ -100,10 +100,8 @@ const previewContent      = $('preview-content');
 // New Preview tabs and panels
 const previewTabs         = $('preview-tabs');
 const tabAiSummary        = $('tab-ai-summary');
-const tabMemoryGraph      = $('tab-memory-graph');
 const tabRawTranscript    = $('tab-raw-transcript');
 const previewContentAi    = $('preview-content-ai');
-const previewContentGraph = $('preview-content-graph');
 
 // Settings modal elements
 const settingsModal       = $('settings-modal');
@@ -160,27 +158,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             'Passed to application state using .app_data(web::Data::new(pool))'
           ],
           handoffPrompt: '[🔄 AI-Enhanced Cross Context Transfer]\nThe user is building a Rust web server using Actix-web and SQLx. They need help setting up the PgPool connection pool and passing it into Actix web application state.'
-        },
-        memoryGraph: {
-          nodes: [
-            { id: 'project_root', type: 'PROJECT', label: 'Rust Actix-web Server' },
-            { id: 'tech_rust', type: 'TECH_STACK', label: 'Rust', properties: { name: 'Rust' } },
-            { id: 'tech_actix_web', type: 'TECH_STACK', label: 'Actix-web', properties: { name: 'Actix-web' } },
-            { id: 'tech_sqlx', type: 'TECH_STACK', label: 'SQLx', properties: { name: 'SQLx' } },
-            { id: 'ai_dec_0', type: 'DECISION', label: 'Initialize connection pool in main fn' },
-            { id: 'ai_task_0', type: 'TASK', label: 'Pass PgPool using .app_data()' },
-            { id: 'ai_issue_0', type: 'ISSUE', label: 'Blocked by database migration checks' }
-          ],
-          edges: [
-            { from: 'tech_rust', to: 'project_root', type: 'IMPLEMENTED_WITH' },
-            { from: 'tech_actix_web', to: 'project_root', type: 'IMPLEMENTED_WITH' },
-            { from: 'tech_sqlx', to: 'project_root', type: 'IMPLEMENTED_WITH' },
-            { from: 'ai_dec_0', to: 'project_root', type: 'RELATED_TO' },
-            { from: 'ai_task_0', to: 'project_root', type: 'DEPENDS_ON' },
-            { from: 'ai_issue_0', to: 'project_root', type: 'BLOCKED_BY' },
-            { from: 'ai_task_0', to: 'tech_actix_web', type: 'RELATED_TO' },
-            { from: 'ai_dec_0', to: 'tech_sqlx', type: 'RELATED_TO' }
-          ]
         }
       },
       {
@@ -194,23 +171,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         messageCount: 4,
         timestamp: Date.now() - 3600000 * 24,
         aiStatus: 'idle',
-        memoryGraph: {
-          nodes: [
-            { id: 'project_root', type: 'PROJECT', label: 'React useDebounce Hook' },
-            { id: 'tech_react', type: 'TECH_STACK', label: 'React', properties: { name: 'React' } },
-            { id: 'tech_javascript', type: 'TECH_STACK', label: 'JavaScript', properties: { name: 'JavaScript' } },
-            { id: 'tech_typescript', type: 'TECH_STACK', label: 'TypeScript', properties: { name: 'TypeScript' } },
-            { id: 'msg_0_task_0', type: 'TASK', label: 'Create a custom hook useDebounce' },
-            { id: 'msg_1_dec_0', type: 'DECISION', label: 'Using useEffect and setTimeout for debouncing' }
-          ],
-          edges: [
-            { from: 'tech_react', to: 'project_root', type: 'IMPLEMENTED_WITH' },
-            { from: 'tech_javascript', to: 'project_root', type: 'IMPLEMENTED_WITH' },
-            { from: 'tech_typescript', to: 'project_root', type: 'IMPLEMENTED_WITH' },
-            { from: 'msg_0_task_0', to: 'project_root', type: 'DEPENDS_ON' },
-            { from: 'msg_1_dec_0', to: 'project_root', type: 'RELATED_TO' }
-          ]
-        }
       }
     ];
     renderContexts();
@@ -781,7 +741,7 @@ function openPreviewModal(contextId) {
 
   currentPreviewId = contextId;
   const isAi = (ctx.aiEnhanced && ctx.aiStatus === 'success') || ctx.aiStatus === 'pending';
-  currentPreviewTab = isAi ? 'ai-summary' : 'memory-graph';
+  currentPreviewTab = isAi ? 'ai-summary' : 'scraped-data';
   renderPreviewContent(ctx);
   previewModal.classList.remove('hidden');
 }
@@ -798,22 +758,18 @@ function closePreviewModal() {
 function renderPreviewContent(ctx) {
   previewContent.innerHTML = '';
   previewContentAi.innerHTML = '';
-  previewContentGraph.innerHTML = '';
 
   const isAiEnhanced = ctx.aiEnhanced && ctx.aiStatus === 'success';
   const isAiPending = ctx.aiStatus === 'pending';
 
-  // Always show tabs now since we have a Memory Graph tab for everyone!
-  previewTabs.classList.remove('hidden');
-
-  // Control visibility of the AI Summary tab button
+  // Only show tabs when AI Summary is available
   if (isAiEnhanced || isAiPending) {
+    previewTabs.classList.remove('hidden');
     tabAiSummary.classList.remove('hidden');
   } else {
+    previewTabs.classList.add('hidden');
     tabAiSummary.classList.add('hidden');
-    if (currentPreviewTab === 'ai-summary') {
-      currentPreviewTab = 'memory-graph';
-    }
+    currentPreviewTab = 'scraped-data';
   }
 
   if (isAiEnhanced || isAiPending) {
@@ -1403,518 +1359,20 @@ function renderPreviewContent(ctx) {
     });
   }
 
-  // Render Memory Graph layout
-  renderMemoryGraph(ctx);
-
   // Manage tab visibility class toggling
   tabAiSummary.classList.remove('active');
-  tabMemoryGraph.classList.remove('active');
   tabRawTranscript.classList.remove('active');
 
   previewContentAi.classList.add('hidden');
-  previewContentGraph.classList.add('hidden');
   previewContent.classList.add('hidden');
 
   if (currentPreviewTab === 'ai-summary') {
     tabAiSummary.classList.add('active');
     previewContentAi.classList.remove('hidden');
-  } else if (currentPreviewTab === 'memory-graph') {
-    tabMemoryGraph.classList.add('active');
-    previewContentGraph.classList.remove('hidden');
-  } else if (currentPreviewTab === 'scraped-data') {
+  } else {
     tabRawTranscript.classList.add('active');
     previewContent.classList.remove('hidden');
   }
-}
-
-function renderMemoryGraph(ctx) {
-  let graph = ctx.memoryGraph;
-  if (!graph) {
-    const engine = new ContextIntelligenceEngine();
-    engine.processConversation(ctx.messages);
-    graph = {
-      nodes: Array.from(engine.nodes.entries()).map(([id, node]) => ({ id, ...node })),
-      edges: engine.edges
-    };
-  }
-
-  if (!graph.nodes || graph.nodes.length <= 1) {
-    previewContentGraph.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">🕸️</div>
-        <p class="empty-title">Insufficient Graph Data</p>
-        <p class="empty-sub">Add tasks, tech stack keyword terms, architecture decisions, or error bugs to build a relationship network.</p>
-      </div>
-    `;
-    return;
-  }
-
-  const container = document.createElement('div');
-  container.className = 'graph-details-container';
-  container.style.display = 'flex';
-  container.style.flexDirection = 'column';
-  container.style.gap = '12px';
-  container.style.height = '100%';
-  container.style.overflow = 'hidden';
-
-  const canvasContainer = document.createElement('div');
-  canvasContainer.className = 'graph-canvas-container';
-
-  const tooltip = document.createElement('div');
-  tooltip.className = 'graph-tooltip hidden';
-  canvasContainer.appendChild(tooltip);
-
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('class', 'graph-svg');
-  canvasContainer.appendChild(svg);
-  container.appendChild(canvasContainer);
-
-  // Deep clone nodes and edges for layout calculations
-  const nodes = graph.nodes.map(n => ({ ...n }));
-  const edges = graph.edges.map(e => ({ ...e }));
-
-  const width = 356;
-  const height = 220;
-  const cx = width / 2;
-  const cy = height / 2;
-
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-
-  // Inject gradients and filters
-  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-  defs.innerHTML = `
-    <!-- Shadows & Glows -->
-    <filter id="node-shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.55"/>
-    </filter>
-
-    <!-- Linear Gradients for Nodes -->
-    <linearGradient id="grad-PROJECT" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#a78bfa" />
-      <stop offset="100%" stop-color="#7c3aed" />
-    </linearGradient>
-    <linearGradient id="grad-TECH_STACK" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8" />
-      <stop offset="100%" stop-color="#0284c7" />
-    </linearGradient>
-    <linearGradient id="grad-TASK" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fbbf24" />
-      <stop offset="100%" stop-color="#d97706" />
-    </linearGradient>
-    <linearGradient id="grad-DECISION" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#34d399" />
-      <stop offset="100%" stop-color="#059669" />
-    </linearGradient>
-    <linearGradient id="grad-ISSUE" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#f87171" />
-      <stop offset="100%" stop-color="#dc2626" />
-    </linearGradient>
-    <linearGradient id="grad-PREFERENCE" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#a3a3a3" />
-      <stop offset="100%" stop-color="#525252" />
-    </linearGradient>
-  `;
-  svg.appendChild(defs);
-
-  // Initialize node positions deterministically in a circle around the project root
-  const nonRootNodes = nodes.filter(n => n.id !== 'project_root');
-  nodes.forEach(n => {
-    if (n.id === 'project_root') {
-      n.x = cx;
-      n.y = cy;
-      n.fixed = true;
-    }
-  });
-  nonRootNodes.forEach((n, idx) => {
-    const angle = (idx / (nonRootNodes.length || 1)) * 2 * Math.PI;
-    const rDist = 65; // radius distance from root
-    n.x = cx + Math.cos(angle) * rDist;
-    n.y = cy + Math.sin(angle) * rDist;
-  });
-
-  const k = Math.sqrt((width * height) / (nodes.length || 1));
-  const repelForce = 1.6;
-  const attractForce = 0.08;
-  const gravityForce = 0.04;
-  const iterations = 150;
-
-  for (let iter = 0; iter < iterations; iter++) {
-    // 1. Repel
-    for (let i = 0; i < nodes.length; i++) {
-      const n1 = nodes[i];
-      n1.fx = 0;
-      n1.fy = 0;
-      for (let j = 0; j < nodes.length; j++) {
-        if (i === j) continue;
-        const n2 = nodes[j];
-        const dx = n1.x - n2.x;
-        const dy = n1.y - n2.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        if (dist < 80) {
-          const force = ((k * k) / dist) * repelForce;
-          n1.fx += (dx / dist) * force;
-          n1.fy += (dy / dist) * force;
-        }
-      }
-    }
-
-    // 2. Attract
-    edges.forEach(e => {
-      const n1 = nodes.find(n => n.id === e.from);
-      const n2 = nodes.find(n => n.id === e.to);
-      if (n1 && n2) {
-        const dx = n1.x - n2.x;
-        const dy = n1.y - n2.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const force = dist * attractForce;
-        const fx = (dx / dist) * force;
-        const fy = (dy / dist) * force;
-
-        if (!n1.fixed) {
-          n1.fx -= fx;
-          n1.fy -= fy;
-        }
-        if (!n2.fixed) {
-          n2.fx += fx;
-          n2.fy += fy;
-        }
-      }
-    });
-
-    // 3. Update
-    nodes.forEach(n => {
-      if (n.fixed) return;
-      const dx = cx - n.x;
-      const dy = cy - n.y;
-      n.fx += dx * gravityForce;
-      n.fy += dy * gravityForce;
-
-      const speed = Math.sqrt(n.fx * n.fx + n.fy * n.fy);
-      const maxSpeed = 8;
-      if (speed > maxSpeed) {
-        n.fx = (n.fx / speed) * maxSpeed;
-        n.fy = (n.fy / speed) * maxSpeed;
-      }
-      n.x += n.fx;
-      n.y += n.fy;
-
-      n.x = Math.max(16, Math.min(width - 16, n.x));
-      n.y = Math.max(16, Math.min(height - 16, n.y));
-    });
-  }
-
-  // Draw edges
-  const edgeElements = [];
-  edges.forEach(e => {
-    const n1 = nodes.find(n => n.id === e.from);
-    const n2 = nodes.find(n => n.id === e.to);
-    if (n1 && n2) {
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', n1.x);
-      line.setAttribute('y1', n1.y);
-      line.setAttribute('x2', n2.x);
-      line.setAttribute('y2', n2.y);
-      line.setAttribute('class', 'graph-edge');
-      line.dataset.from = e.from;
-      line.dataset.to = e.to;
-      line.dataset.type = e.type;
-      svg.appendChild(line);
-      edgeElements.push({ data: e, el: line });
-    }
-  });
-
-  // Draw nodes
-  const nodeElements = [];
-  nodes.forEach(n => {
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('class', `graph-node type-${n.type}`);
-    g.dataset.id = n.id;
-
-    const radius = n.id === 'project_root' ? 14 : 9.5;
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', n.x);
-    circle.setAttribute('cy', n.y);
-    circle.setAttribute('r', radius);
-    circle.setAttribute('fill', `url(#grad-${n.type})`);
-    circle.setAttribute('filter', 'url(#node-shadow)');
-    circle.setAttribute('stroke', n.id === 'project_root' ? '#c084fc' : '#ffffff');
-    circle.setAttribute('stroke-opacity', '0.25');
-    circle.setAttribute('stroke-width', '1');
-
-    const strokeColors = {
-      PROJECT: '#a78bfa',
-      TECH_STACK: '#38bdf8',
-      TASK: '#fbbf24',
-      DECISION: '#34d399',
-      ISSUE: '#f87171',
-      PREFERENCE: '#a3a3a3'
-    };
-    g.style.setProperty('--node-stroke-color', strokeColors[n.type] || '#a78bfa');
-
-    // Emoji centered inside the circle
-    const emojis = {
-      PROJECT: '🏠',
-      TECH_STACK: '💻',
-      TASK: '🎯',
-      DECISION: '🔑',
-      ISSUE: '⚠️',
-      PREFERENCE: '⚙️'
-    };
-    const emoji = emojis[n.type] || '❓';
-
-    const emojiText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    emojiText.setAttribute('x', n.x);
-    emojiText.setAttribute('y', n.y);
-    emojiText.setAttribute('text-anchor', 'middle');
-    emojiText.setAttribute('dominant-baseline', 'central');
-    emojiText.style.fontSize = n.id === 'project_root' ? '12px' : '8.5px';
-    emojiText.style.pointerEvents = 'none';
-    emojiText.style.userSelect = 'none';
-    emojiText.textContent = emoji;
-
-    // Label styling with halo shadow
-    let cleanLabel = n.label || '';
-    if (n.id === 'project_root') {
-      cleanLabel = ctx.platform.toUpperCase();
-    } else {
-      if (cleanLabel.length > 14) {
-        cleanLabel = cleanLabel.substring(0, 12) + '...';
-      }
-    }
-
-    const textShadow = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    textShadow.setAttribute('x', n.x);
-    textShadow.setAttribute('y', n.y + radius + 11);
-    textShadow.setAttribute('text-anchor', 'middle');
-    textShadow.setAttribute('class', 'node-label-shadow');
-    textShadow.textContent = cleanLabel;
-
-    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    text.setAttribute('x', n.x);
-    text.setAttribute('y', n.y + radius + 11);
-    text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('class', 'node-label');
-    text.textContent = cleanLabel;
-
-    g.appendChild(circle);
-    g.appendChild(emojiText);
-    g.appendChild(textShadow);
-    g.appendChild(text);
-    svg.appendChild(g);
-    
-    nodeElements.push({ data: n, el: g });
-  });
-
-  // Locked highlighting state
-  let lockedNodeId = null;
-
-  const showTooltip = (node) => {
-    const emojis = {
-      PROJECT: '🏠',
-      TECH_STACK: '💻',
-      TASK: '🎯',
-      DECISION: '🔑',
-      ISSUE: '⚠️',
-      PREFERENCE: '⚙️'
-    };
-    const emoji = emojis[node.type] || '❓';
-    const typeLabel = node.type.replace('_', ' ');
-    
-    tooltip.innerHTML = `
-      <div class="graph-tooltip-header">
-        <span class="graph-tooltip-type ${node.type.toLowerCase()}">${typeLabel}</span>
-        <span class="graph-tooltip-label">${emoji} ${escapeHtml(node.label)}</span>
-      </div>
-      ${node.properties?.description ? `<div class="graph-tooltip-desc">${escapeHtml(node.properties.description)}</div>` : ''}
-    `;
-    tooltip.classList.remove('hidden');
-  };
-
-  const hideTooltip = () => {
-    tooltip.classList.add('hidden');
-  };
-
-  const highlightConnected = (nodeId) => {
-    const connectedNodeIds = new Set([nodeId]);
-    
-    edgeElements.forEach(edge => {
-      if (edge.data.from === nodeId) {
-        connectedNodeIds.add(edge.data.to);
-        edge.el.classList.add('highlighted');
-        edge.el.classList.remove('dimmed');
-      } else if (edge.data.to === nodeId) {
-        connectedNodeIds.add(edge.data.from);
-        edge.el.classList.add('highlighted');
-        edge.el.classList.remove('dimmed');
-      } else {
-        edge.el.classList.add('dimmed');
-        edge.el.classList.remove('highlighted');
-      }
-    });
-
-    nodeElements.forEach(node => {
-      if (connectedNodeIds.has(node.data.id)) {
-        node.el.classList.add('highlighted');
-        node.el.classList.remove('dimmed');
-      } else {
-        node.el.classList.add('dimmed');
-        node.el.classList.remove('highlighted');
-      }
-    });
-
-    const cards = container.querySelectorAll('.graph-item-card');
-    cards.forEach(card => {
-      if (card.dataset.id === nodeId) {
-        card.classList.add('highlighted');
-        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      } else {
-        card.classList.remove('highlighted');
-      }
-    });
-  };
-
-  const resetHighlight = () => {
-    nodeElements.forEach(node => {
-      node.el.classList.remove('highlighted', 'dimmed');
-    });
-    edgeElements.forEach(edge => {
-      edge.el.classList.remove('highlighted', 'dimmed');
-    });
-    const cards = container.querySelectorAll('.graph-item-card');
-    cards.forEach(card => {
-      card.classList.remove('highlighted');
-    });
-    hideTooltip();
-  };
-
-  const handleMouseEnter = (nodeId) => {
-    const nodeObj = nodes.find(n => n.id === nodeId);
-    if (nodeObj) {
-      showTooltip(nodeObj);
-    }
-    highlightConnected(nodeId);
-  };
-
-  const handleMouseLeave = () => {
-    if (lockedNodeId) {
-      highlightConnected(lockedNodeId);
-      const lockedNodeObj = nodes.find(n => n.id === lockedNodeId);
-      if (lockedNodeObj) {
-        showTooltip(lockedNodeObj);
-      }
-    } else {
-      resetHighlight();
-    }
-  };
-
-  const handleNodeClick = (nodeId, event) => {
-    if (event) event.stopPropagation();
-    if (lockedNodeId === nodeId) {
-      lockedNodeId = null;
-      resetHighlight();
-    } else {
-      lockedNodeId = nodeId;
-      highlightConnected(nodeId);
-      const nodeObj = nodes.find(n => n.id === nodeId);
-      if (nodeObj) {
-        showTooltip(nodeObj);
-      }
-    }
-  };
-
-  nodeElements.forEach(node => {
-    node.el.addEventListener('mouseenter', () => {
-      handleMouseEnter(node.data.id);
-    });
-    node.el.addEventListener('mouseleave', () => {
-      handleMouseLeave();
-    });
-    node.el.addEventListener('click', (e) => {
-      handleNodeClick(node.data.id, e);
-    });
-  });
-
-  svg.addEventListener('click', (e) => {
-    if (e.target === svg) {
-      lockedNodeId = null;
-      resetHighlight();
-    }
-  });
-
-  // Categorized detailed lists
-  const detailsList = document.createElement('div');
-  detailsList.className = 'graph-details-list';
-
-  const categories = {
-    TECH_STACK: { title: 'Technical Stack', color: '#38bdf8', items: [] },
-    TASK: { title: 'Active Tasks & TODOs', color: '#fbbf24', items: [] },
-    DECISION: { title: 'Architecture Decisions', color: '#34d399', items: [] },
-    ISSUE: { title: 'Errors & Issues Tracked', color: '#f87171', items: [] },
-    PREFERENCE: { title: 'User Preferences', color: '#a3a3a3', items: [] }
-  };
-
-  graph.nodes.forEach(n => {
-    if (categories[n.type]) {
-      categories[n.type].items.push(n);
-    }
-  });
-
-  for (const [type, cat] of Object.entries(categories)) {
-    if (cat.items.length === 0) continue;
-
-    const catSection = document.createElement('div');
-    catSection.className = 'graph-category-section';
-
-    const catTitle = document.createElement('div');
-    catTitle.className = 'graph-category-title';
-    catTitle.innerHTML = `
-      <span style="color: ${cat.color};">✦</span>
-      <span>${cat.title}</span>
-    `;
-    catSection.appendChild(catTitle);
-
-    const itemGrid = document.createElement('div');
-    itemGrid.className = 'graph-item-grid';
-
-    cat.items.forEach(item => {
-      const card = document.createElement('div');
-      card.className = 'graph-item-card';
-      card.dataset.id = item.id;
-      card.style.setProperty('--item-stroke-color', cat.color);
-      card.style.setProperty('--item-bg-color', `${cat.color}08`);
-      card.style.setProperty('--item-text-color', '#ffffff');
-      card.style.setProperty('--item-glow-color', `${cat.color}15`);
-
-      const bullet = document.createElement('span');
-      bullet.className = 'graph-item-bullet';
-      bullet.style.setProperty('--bullet-color', cat.color);
-
-      const content = document.createElement('div');
-      content.className = 'graph-item-content';
-      content.textContent = item.label;
-
-      card.appendChild(bullet);
-      card.appendChild(content);
-
-      card.addEventListener('mouseenter', () => {
-        handleMouseEnter(item.id);
-      });
-      card.addEventListener('mouseleave', () => {
-        handleMouseLeave();
-      });
-      card.addEventListener('click', (e) => {
-        handleNodeClick(item.id, e);
-      });
-
-      itemGrid.appendChild(card);
-    });
-
-    catSection.appendChild(itemGrid);
-    detailsList.appendChild(catSection);
-  }
-
-  container.appendChild(detailsList);
-  previewContentGraph.appendChild(container);
 }
 
 function openFullscreenImage(src) {
@@ -2023,12 +1481,6 @@ function setupSettingsListeners() {
 function setupTabListeners() {
   tabAiSummary.addEventListener('click', () => {
     currentPreviewTab = 'ai-summary';
-    const ctx = savedContexts.find(c => c.id === currentPreviewId);
-    if (ctx) renderPreviewContent(ctx);
-  });
-
-  tabMemoryGraph.addEventListener('click', () => {
-    currentPreviewTab = 'memory-graph';
     const ctx = savedContexts.find(c => c.id === currentPreviewId);
     if (ctx) renderPreviewContent(ctx);
   });
