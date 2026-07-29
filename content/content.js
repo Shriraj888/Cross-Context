@@ -3000,10 +3000,17 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
 
       if (dominantIntent === 'coding') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Coding Briefing]
-${idTag}I was working on a coding project with ${src}. Here is where we left off:
+${idTag}## 🤖 AI Summary
+${summary}
+
+### 🧠 Priority Memories & Key Context
+${bulletJoin(e.priority_memories)}
+
+---
+
+I was working on a coding project with ${src}. Here is where we left off:
 
 📁 What I was building:
-- Project Summary: ${summary}
 - Tech Stack: ${tech}
 - Target Files: ${files}
 
@@ -3029,10 +3036,17 @@ ${handoff}`;
 
       if (dominantIntent === 'debugging') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Debugging Briefing]
-${idTag}I was working on debugging an issue with ${src}. Here is where we left off:
+${idTag}## 🤖 AI Summary
+${summary}
+
+### 🧠 Priority Memories & Key Context
+${bulletJoin(e.priority_memories)}
+
+---
+
+I was working on debugging an issue with ${src}. Here is where we left off:
 
 📁 What I was building & testing:
-- Project Summary: ${summary}
 - Tech Stack: ${tech}
 - Target Files: ${files}
 
@@ -3057,10 +3071,17 @@ ${handoff}`;
 
       if (dominantIntent === 'brainstorming') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Brainstorming Briefing]
-${idTag}I was brainstorming and planning with ${src}. Here is where we left off:
+${idTag}## 🤖 AI Summary
+${summary}
+
+### 🧠 Priority Memories & Key Context
+${bulletJoin(e.priority_memories)}
+
+---
+
+I was brainstorming and planning with ${src}. Here is where we left off:
 
 📁 What I was building/planning:
-- Core Topic/Overview: ${summary}
 - Referenced Files: ${files || 'None recorded'}
 
 💡 Key concepts & ideas developed:
@@ -3088,10 +3109,17 @@ ${handoff}`;
 
       if (dominantIntent === 'research') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Research Briefing]
-${idTag}I was researching and studying with ${src}. Here is where we left off:
+${idTag}## 🤖 AI Summary
+${summary}
+
+### 🧠 Priority Memories & Key Context
+${bulletJoin(e.priority_memories)}
+
+---
+
+I was researching and studying with ${src}. Here is where we left off:
 
 📁 What I was researching:
-- Research Focus: ${summary}
 - Referenced Files & Sources: ${files || 'None recorded'}
 
 💡 Core concepts discovered:
@@ -3116,10 +3144,17 @@ ${handoff}`;
 
       if (dominantIntent === 'writing') {
         return `[🔄 AI-Enhanced Cross Context Transfer — Writing Briefing]
-${idTag}I was drafting and composing text with ${src}. Here is where we left off:
+${idTag}## 🤖 AI Summary
+${summary}
+
+### 🧠 Priority Memories & Key Context
+${bulletJoin(e.priority_memories)}
+
+---
+
+I was drafting and composing text with ${src}. Here is where we left off:
 
 📁 What I was writing:
-- Narrative/Content Overview: ${summary}
 - Referenced Documents: ${files || 'None recorded'}
 
 💡 Synthesized ideas & guidelines:
@@ -3141,10 +3176,17 @@ ${handoff}`;
 
       // General fallback
       return `[🔄 AI-Enhanced Cross Context Transfer — Briefing]
-${idTag}I was working on a project with ${src}. Here is where we left off:
+${idTag}## 🤖 AI Summary
+${summary}
+
+### 🧠 Priority Memories & Key Context
+${bulletJoin(e.priority_memories)}
+
+---
+
+I was working on a project with ${src}. Here is where we left off:
 
 📁 What I was building:
-- Project Summary: ${summary}
 - Tech Stack & Active Files: Stack: ${tech} | Files: ${files}
 
 🔑 Key decisions made so far:
