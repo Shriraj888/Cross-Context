@@ -363,17 +363,6 @@ function createContextCard(ctx) {
     </span>`;
   }
 
-  // Filter platforms to other platforms for quick handoff targets
-  const targets = Object.keys(PLATFORMS).filter(p => p !== ctx.platform);
-  let targetsHtml = '';
-  targets.forEach(tgt => {
-    const tgtPlatform = PLATFORMS[tgt];
-    targetsHtml += `
-      <button class="quick-inject-btn target-${tgt}" data-action="quick-inject" data-target="${tgt}" data-id="${ctx.id}" title="Handoff to ${tgtPlatform.name}">
-        ${getPlatformIcon(tgt, 18)}
-      </button>
-    `;
-  });
 
   card.innerHTML = `
     <div class="card-main">
@@ -411,9 +400,6 @@ function createContextCard(ctx) {
           </svg>
           <span>Preview</span>
         </button>
-      </div>
-      <div class="quick-inject-tray">
-        ${targetsHtml}
       </div>
       <button class="hover-action-btn delete-btn" data-action="delete" data-id="${ctx.id}" title="Delete Context">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -493,88 +479,6 @@ async function handleDirectCopy(id) {
   }
 }
 
-// Platform themes for injection overlay variables
-const PLATFORM_THEMES = {
-  claude:     { primary: '#d97752', bg: 'rgba(217, 119, 82, 0.06)', border: 'rgba(217, 119, 82, 0.15)' },
-  chatgpt:    { primary: '#10b981', bg: 'rgba(16, 185, 129, 0.06)', border: 'rgba(16, 185, 129, 0.15)' },
-  gemini:     { primary: '#3b82f6', bg: 'rgba(59, 130, 246, 0.06)', border: 'rgba(59, 130, 246, 0.15)' },
-  grok:       { primary: '#f4f4f5', bg: 'rgba(244, 244, 245, 0.04)', border: 'rgba(244, 244, 245, 0.1)' },
-  perplexity: { primary: '#0ea5e9', bg: 'rgba(14, 165, 233, 0.06)', border: 'rgba(14, 165, 233, 0.15)' },
-};
-
-function getInjectOverlayIcon(platformKey) {
-  const svg = getPlatformIcon(platformKey, 28);
-  // Strip inline styles so popup.css is 100% in control
-  return svg.replace(/style="[^"]*"/g, '');
-}
-
-// Quick transfer inject trigger
-async function handleQuickInject(id, targetPlatform) {
-  const ctx = savedContexts.find(c => c.id === id);
-  if (!ctx) return;
-
-  const overlay = $('injecting-overlay');
-  const srcIcon = $('inject-source-icon');
-  const tgtIcon = $('inject-target-icon');
-  const title = $('inject-title');
-  const subtitle = $('inject-subtitle');
-
-  if (!overlay || !srcIcon || !tgtIcon || !title || !subtitle) {
-    // Fallback if elements are missing
-    try {
-      showToast(`🚀 Launching ${PLATFORMS[targetPlatform].name}...`, 'info');
-      await sendMessage({
-        type: 'INJECT_CONTEXT',
-        payload: { context: ctx, targetPlatform }
-      });
-    } catch (err) {
-      showToast('Error: ' + err.message, 'error');
-    }
-    return;
-  }
-
-  // Bind specific brand theme color variables dynamically
-  const srcTheme = PLATFORM_THEMES[ctx.platform] || { primary: '#7c3aed', bg: 'rgba(124, 58, 237, 0.06)', border: 'rgba(124, 58, 237, 0.15)' };
-  const tgtTheme = PLATFORM_THEMES[targetPlatform] || { primary: '#3b82f6', bg: 'rgba(59, 130, 246, 0.06)', border: 'rgba(59, 130, 246, 0.15)' };
-
-  overlay.style.setProperty('--source-color', srcTheme.primary);
-  overlay.style.setProperty('--source-bg', srcTheme.bg);
-  overlay.style.setProperty('--source-border', srcTheme.border);
-
-  overlay.style.setProperty('--target-color', tgtTheme.primary);
-  overlay.style.setProperty('--target-bg', tgtTheme.bg);
-  overlay.style.setProperty('--target-border', tgtTheme.border);
-
-  // Set assets and texts
-  srcIcon.innerHTML = getInjectOverlayIcon(ctx.platform);
-  tgtIcon.innerHTML = getInjectOverlayIcon(targetPlatform);
-  title.textContent = 'Injecting...';
-  
-  const srcName = PLATFORMS[ctx.platform]?.name || ctx.platform;
-  const tgtName = PLATFORMS[targetPlatform]?.name || targetPlatform;
-  subtitle.innerHTML = `Transferring context from <strong>${srcName}</strong><br>to <strong>${tgtName}</strong>…`;
-
-  // Reveal the connecting overlay
-  overlay.classList.remove('hidden');
-
-  // Let the premium floating / shimmer flow animation run for 1400ms in the popup
-  setTimeout(async () => {
-    try {
-      const result = await sendMessage({
-        type: 'INJECT_CONTEXT',
-        payload: { context: ctx, targetPlatform }
-      });
-      if (!result?.success) {
-        showToast(result?.error || 'Launch failed', 'error');
-        overlay.classList.add('hidden');
-      }
-      // Note: If success, the tab opens and focuses, automatically closing this popup
-    } catch (err) {
-      showToast('Error: ' + err.message, 'error');
-      overlay.classList.add('hidden');
-    }
-  }, 1400);
-}
 
 // Sync sliding backdrop positioning for active filter chip
 function syncFilterBackdrop() {
@@ -614,9 +518,6 @@ function bindEvents() {
       handleDeleteContext(id);
     } else if (action === 'copy') {
       handleDirectCopy(id);
-    } else if (action === 'quick-inject') {
-      const target = actionEl.dataset.target;
-      handleQuickInject(id, target);
     }
   });
 
