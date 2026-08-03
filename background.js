@@ -81,7 +81,14 @@ async function handleSaveContext(context, sendResponse) {
       }
     }
 
-    sendResponse({ success: true, context: newContext });
+    // §5.3 Fix: Detect silent eviction and include the evicted title in the response
+    // so the popup can surface a toast warning instead of silently discarding context.
+    let evictedTitle = null;
+    if (contexts.length >= MAX_SAVED_CONTEXTS) {
+      evictedTitle = contexts[contexts.length - 1]?.title || 'Unnamed context';
+    }
+
+    sendResponse({ success: true, context: newContext, evictedTitle });
 
     // Kick off Gemini API enhancement asynchronously in background
     if (newContext.aiStatus === 'pending') {
@@ -344,7 +351,35 @@ async function pollAndInject(tabId, targetPlatform, context, maxAttempts = 20, b
 // ──────────────────────────────────────────────
 // Image Fetcher & Bypass CORS
 // ──────────────────────────────────────────────
+
+/**
+ * §4.3 Fix: Validate that the image URL is safe to proxy from the background context.
+ * Blocks non-https, localhost, loopback, link-local (cloud metadata), and private IP ranges.
+ */
+function isSafeImageUrl(url) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return false; }
+  if (parsed.protocol !== 'https:') return false;
+  const host = parsed.hostname;
+  // Reject localhost and loopback
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return false;
+  // Reject link-local / cloud metadata addresses (e.g. 169.254.169.254 on AWS/GCP)
+  if (/^169\.254\./.test(host)) return false;
+  // Reject private IP ranges (RFC 1918)
+  if (/^10\./.test(host)) return false;
+  if (/^192\.168\./.test(host)) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+  return true;
+}
+
 async function handleFetchImageBase64(url, sendResponse) {
+  // §4.3 Fix: Reject URLs that would make the background context proxy requests to
+  // internal/private addresses — an SSRF-adjacent risk.
+  if (!isSafeImageUrl(url)) {
+    sendResponse({ success: false, error: 'Blocked: URL is not a safe external https:// address.' });
+    return;
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
 
@@ -577,7 +612,12 @@ async function runGeminiEnhancement(contextId) {
 
     if (!pass1Response.ok) {
       const errText = await pass1Response.text();
-      throw new Error(`Gemini API Pass 1 Error: HTTP ${pass1Response.status} - ${errText}`);
+      // §3.2 Fix: Provide a human-readable error when a model has been shut down
+      const is404 = pass1Response.status === 404;
+      const friendlyMsg = is404
+        ? `The selected Gemini model '${model}' is no longer available (HTTP 404). Please choose a different model in Settings.`
+        : `Gemini API Pass 1 Error: HTTP ${pass1Response.status} - ${errText}`;
+      throw new Error(friendlyMsg);
     }
 
     const pass1Json = await pass1Response.json();
@@ -716,7 +756,12 @@ ${JSON.stringify(pass1ParsedResult, null, 2)}
 
     if (!pass2Response.ok) {
       const errText = await pass2Response.text();
-      throw new Error(`Gemini API Pass 2 Error: HTTP ${pass2Response.status} - ${errText}`);
+      // §3.2 Fix: Provide a human-readable error when a model has been shut down
+      const is404 = pass2Response.status === 404;
+      const friendlyMsg = is404
+        ? `The selected Gemini model '${model}' is no longer available (HTTP 404). Please choose a different model in Settings.`
+        : `Gemini API Pass 2 Error: HTTP ${pass2Response.status} - ${errText}`;
+      throw new Error(friendlyMsg);
     }
 
     const pass2Json = await pass2Response.json();

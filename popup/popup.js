@@ -716,6 +716,12 @@ async function captureConversation(isAiScrape) {
       }
 
       showToast(toastMsg, 'success');
+      // §5.3 Fix: Surface a warning if saving evicted the oldest context
+      if (saveResult.evictedTitle) {
+        setTimeout(() => {
+          showToast(`ℹ️ Oldest context removed to make room: "${saveResult.evictedTitle}"`, 'warning');
+        }, 2500);
+      }
     } else {
       if (saveResult?.error === 'quota_exceeded') {
         showToast('⚠️ Storage limit reached! Please delete past contexts to free up space.', 'error');
@@ -1414,7 +1420,8 @@ async function loadSettings() {
   inputApiKey.value = settings.geminiApiKey || '';
   const model = settings.geminiModel || 'gemini-3.5-flash';
   
-  if (['gemini-3.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'].includes(model)) {
+  // §3.2 Fix: Updated allow-list — gemini-2.0-flash and gemini-1.5-flash are shutdown
+  if (['gemini-3.5-flash', 'gemini-3.6-flash'].includes(model)) {
     selectModel.value = model;
     inputModelCustom.classList.add('hidden');
     inputModelCustom.value = '';
@@ -1436,6 +1443,11 @@ async function handleSaveSettings() {
     modelName = inputModelCustom.value.trim();
     if (!modelName) {
       showToast('⚠️ Please enter custom model name', 'error');
+      return;
+    }
+    // §5.5 Fix: Validate custom model name format to catch typos early
+    if (!/^[a-zA-Z0-9.\-]+$/.test(modelName)) {
+      showToast('⚠️ Invalid model name — use only letters, numbers, dots, and hyphens', 'error');
       return;
     }
   }

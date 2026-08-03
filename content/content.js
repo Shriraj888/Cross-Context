@@ -1582,13 +1582,20 @@
         dispatchInputEvents(el);
       }
     } else {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.execCommand('selectAll', false, null);
-      const success = document.execCommand('insertText', false, text);
+      try {
+        if (document.body.contains(el)) {
+          const selection = window.getSelection();
+          if (selection) {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        }
+      } catch (_) {}
+      try { document.execCommand('selectAll', false, null); } catch (_) {}
+      let success = false;
+      try { success = document.execCommand('insertText', false, text); } catch (_) {}
       if (!success || !el.textContent.trim()) {
         el.innerText = text;
         dispatchInputEvents(el);
@@ -1745,7 +1752,9 @@
 
       shadow.innerHTML = `
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+          /* §6.2 Fix: Removed remote Google Fonts @import — eliminates unnecessary
+             third-party network request on every LLM page. The system-font stack
+             below provides a high-quality fallback without any network cost. */
 
           .cc-preview-card {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -1948,7 +1957,7 @@
               <span class="cc-mode-badge ${isFileMode ? 'file' : 'text'}">${isFileMode ? `📄 Attached ${fileName}` : '📝 Text Paste Fallback'}</span>
             </div>
           </div>
-          <div class="cc-preview-body" id="cc-preview-body-text">${previewText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          <div class="cc-preview-body" id="cc-preview-body-text">${previewText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
           <div class="cc-preview-actions">
             <button class="cc-preview-btn cancel" id="cc-preview-cancel">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;">
@@ -1972,6 +1981,7 @@
       const cancelBtn = shadow.getElementById('cc-preview-cancel');
 
       const cleanup = (resultValue) => {
+        try { document.removeEventListener('keydown', keyHandler); } catch (_) {}
         try { host.remove(); } catch (_) {}
       };
 
@@ -1987,10 +1997,10 @@
       const keyHandler = (e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
-          wrappedCleanup(false);
+          cleanup(false);
         } else if (e.key === 'Enter') {
           e.preventDefault();
-          wrappedCleanup(true);
+          cleanup(true);
         }
       };
       document.addEventListener('keydown', keyHandler);
@@ -1998,7 +2008,7 @@
       // Auto-timeout after 60 seconds (auto-send)
       const timeoutId = setTimeout(() => {
         if (document.getElementById('__cc-preview-host')) {
-          wrappedCleanup(true);
+          cleanup(true);
         }
       }, 60000);
     });
@@ -2035,7 +2045,10 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
       chatgpt: '[data-testid="file-chip"], [class*="attachment-item"], [class*="file-"], [data-testid*="attachment"]',
       gemini: 'uploader-file-chip, upload-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"], [class*="file-chip"], [class*="uploaded-file"], mat-chip, .mat-mdc-chip',
       grok: '[class*="attachment"], [class*="file-chip"], [class*="file-"]',
-      perplexity: '[class*="file-badge"], [class*="attachment"], [class*="file-"]'
+      chatgpt: '[data-testid="file-chip"], [class*="attachment-item"], [class*="file-"], [data-testid*="attachment"]',
+      gemini: 'uploader-file-chip, upload-file-chip, [class*="file-preview"], [class*="attachment"], [class*="upload-chip"], [class*="file-chip"], [class*="uploaded-file"], mat-chip, .mat-mdc-chip',
+      grok: '[class*="attachment"], [class*="file-chip"], [class*="file-"]',
+      perplexity: '[class*="file-badge" i], [class*="file-chip" i], [class*="file-preview" i], [class*="attachment" i], [class*="Attachment" i], [class*="FileBadge" i], [data-testid*="attachment" i], [data-testid*="file" i]'
     };
     const sel = selectors[platform];
     if (!sel) return true;
@@ -2308,22 +2321,36 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
 
       // Helper function to insert text into Gemini Quill/contenteditable editor
       const insertIntoGemini = (text) => {
-        el.focus();
-        try { el.click(); } catch (_) {}
+        let targetEl = el;
+        if (!targetEl || !document.body.contains(targetEl)) {
+          targetEl = document.querySelector(geminiInputSelectors) || el;
+        }
+        if (!targetEl || !document.body.contains(targetEl)) return;
 
-        // Select all to clear
-        const selection = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        document.execCommand('selectAll', false, null);
+        try { targetEl.focus(); } catch (_) {}
+        try { targetEl.click(); } catch (_) {}
+
+        // Select all to clear safely
+        try {
+          const selection = window.getSelection();
+          if (selection && document.body.contains(targetEl)) {
+            const range = document.createRange();
+            range.selectNodeContents(targetEl);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        } catch (_) {}
+
+        try { document.execCommand('selectAll', false, null); } catch (_) {}
 
         // First attempt: execCommand insertText
-        let success = document.execCommand('insertText', false, text);
+        let success = false;
+        try {
+          success = document.execCommand('insertText', false, text);
+        } catch (_) {}
 
         // Second attempt: paste event via DataTransfer if execCommand failed
-        if (!success || !el.textContent.trim()) {
+        if (!success || !targetEl.textContent.trim()) {
           try {
             const dt = new DataTransfer();
             dt.setData('text/plain', text);
@@ -2332,25 +2359,25 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
               bubbles: true,
               cancelable: true
             });
-            el.dispatchEvent(pasteEvt);
+            targetEl.dispatchEvent(pasteEvt);
           } catch (_) {}
         }
 
         // Third attempt: format HTML with <p> tags & remove ql-blank
-        if (!el.textContent.trim()) {
+        if (!targetEl.textContent.trim()) {
           try {
-            el.innerHTML = formatGeminiHtml(text);
-            el.classList.remove('ql-blank');
+            targetEl.innerHTML = formatGeminiHtml(text);
+            targetEl.classList.remove('ql-blank');
           } catch (_) {
-            el.innerText = text;
+            targetEl.innerText = text;
           }
         }
 
-        dispatchInputEvents(el);
+        dispatchInputEvents(targetEl);
 
         // Additional Angular/Quill event dispatching on parent
         try {
-          const parent = el.closest('fieldset') || el.closest('rich-textarea') || el.parentElement;
+          const parent = targetEl.closest('fieldset') || targetEl.closest('rich-textarea') || targetEl.parentElement;
           if (parent) {
             parent.dispatchEvent(new Event('input', { bubbles: true }));
             parent.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2519,24 +2546,190 @@ Continue this project using the attached \`${fileName}\` file block above. Respo
     },
 
     async perplexity(prompt, contextId) {
-      const el = await waitForElement(
-        'textarea[placeholder*="Ask"], textarea[placeholder*="Search"], textarea[class*="textarea"], textarea, [contenteditable="true"]'
-      );
+      const perplexityInputSelectors = [
+        'textarea[placeholder*="Ask" i]',
+        'textarea[placeholder*="Search" i]',
+        'textarea[placeholder*="Anything" i]',
+        'textarea[placeholder*="Follow-up" i]',
+        'textarea[class*="textarea"]',
+        'textarea',
+        '[contenteditable="true"][class*="editor"]',
+        '[contenteditable="true"]'
+      ].join(', ');
+
+      const el = await waitForElement(perplexityInputSelectors);
       if (!el) return { success: false, error: 'Perplexity input not found' };
 
       const fileName = contextId ? `context-${contextId}.md` : 'context.md';
-      const fileResult = await attachMarkdownFile(prompt, null, fileName);
-      const isFileAttached = fileResult.success && (await waitForFileUploadComplete('perplexity', 1000));
+      const file = new File([prompt], fileName, { type: 'text/plain' });
+      let isFileAttached = false;
 
+      // Chip selectors used to verify file attachment in Perplexity
+      const chipSel = [
+        '[class*="file-badge" i]',
+        '[class*="file-chip" i]',
+        '[class*="file-preview" i]',
+        '[class*="attachment" i]',
+        '[class*="Attachment" i]',
+        '[class*="FileBadge" i]',
+        '[data-testid*="attachment" i]',
+        '[data-testid*="file" i]'
+      ].join(', ');
+
+      const waitForChip = async (timeoutMs = 2500) => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          if (document.querySelector(chipSel)) return true;
+          await sleep(100);
+        }
+        return false;
+      };
+
+      // ── Perplexity File Upload Flow ──
+      // Step 1: Click the Attach button if input[type="file"] isn't directly visible yet
+      let fileInput = document.querySelector('input[type="file"]');
+      if (!fileInput) {
+        const uploadBtnSelectors = [
+          'button[aria-label*="Attach" i]',
+          'button[aria-label*="Upload" i]',
+          'button[aria-label*="Add" i]',
+          'button[aria-label*="File" i]',
+          '[data-testid*="attach" i]',
+          '[data-testid*="upload" i]',
+          'button:has(svg[data-icon="paperclip"])',
+          'button:has(svg[data-icon="plus"])'
+        ].join(', ');
+
+        const uploadBtn = document.querySelector(uploadBtnSelectors);
+        if (uploadBtn) {
+          try {
+            uploadBtn.click();
+            await sleep(400);
+          } catch (_) {}
+        }
+      }
+
+      // Check for <input type="file"> after clicking upload button
+      for (let i = 0; i < 20; i++) {
+        const inputs = document.querySelectorAll('input[type="file"]');
+        if (inputs.length > 0) {
+          fileInput = inputs[inputs.length - 1];
+          break;
+        }
+        await sleep(100);
+      }
+
+      // Strategy 1: Attach via <input type="file"> and DataTransfer
+      if (fileInput) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          fileInput.files = dt.files;
+          fileInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+          fileInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+
+          isFileAttached = await waitForChip(2000);
+        } catch (_) {}
+      }
+
+      // Strategy 2: Drag and drop onto textarea/container
+      if (!isFileAttached) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const dropTarget = el.closest('form') || el.closest('div[class*="query"]') || el;
+          dropTarget.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          await sleep(50);
+          dropTarget.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          await sleep(50);
+          dropTarget.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+
+          isFileAttached = await waitForChip(1500);
+        } catch (_) {}
+      }
+
+      // Strategy 3: Clipboard paste of file
+      if (!isFileAttached) {
+        try {
+          el.focus();
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const pasteEvt = new ClipboardEvent('paste', {
+            clipboardData: dt,
+            bubbles: true,
+            cancelable: true
+          });
+          el.dispatchEvent(pasteEvt);
+
+          isFileAttached = await waitForChip(1500);
+        } catch (_) {}
+      }
+
+      // Strategy 4: Fallback to attachMarkdownFile helper
+      if (!isFileAttached) {
+        const fileResult = await attachMarkdownFile(prompt, null, fileName);
+        if (fileResult.success) {
+          isFileAttached = await waitForFileUploadComplete('perplexity', 1500);
+        }
+      }
+
+      // Choose payload: companion instruction if file attached, or text form payload if file attachment failed
       const payload = isFileAttached
         ? getCompanionMessage(fileName, contextId)
         : formatFileBlockPayload(prompt, fileName, contextId);
 
+      // Programmatically insert text into Perplexity input
       insertTextProgrammatically(el, payload);
+      await sleep(100);
+
       const confirmed = await showPreviewConfirmation(prompt, isFileAttached, fileName);
       if (!confirmed) return { success: false, error: 'Injection cancelled by user' };
+
+      // Re-verify text content after modal confirmation
+      if (el.tagName === 'TEXTAREA') {
+        if (!el.value || !el.value.trim()) {
+          insertTextProgrammatically(el, payload);
+        }
+      } else {
+        if (!el.textContent || !el.textContent.trim()) {
+          insertTextProgrammatically(el, payload);
+        }
+      }
+
       await sleep(300);
-      trySubmit(el, 'button[aria-label*="Submit"], button[type="submit"], button[class*="send"]');
+
+      // Submit to Perplexity
+      const perplexitySubmitSelectors = [
+        'button[aria-label*="Submit" i]',
+        'button[aria-label*="Send" i]',
+        'button[aria-label*="Search" i]',
+        'button[type="submit"]',
+        'button[class*="submit" i]',
+        'button[class*="send" i]',
+        '[data-testid*="submit" i]',
+        '[data-testid*="send" i]'
+      ].join(', ');
+
+      let submitted = false;
+      for (let i = 0; i < 30; i++) {
+        const btn = document.querySelector(perplexitySubmitSelectors);
+        const isDisabled = btn && (btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.classList.contains('disabled'));
+        if (btn && !isDisabled) {
+          try {
+            btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+          } catch (_) {}
+          btn.click();
+          submitted = true;
+          break;
+        }
+        await sleep(100);
+      }
+
+      if (!submitted) {
+        trySubmit(el, perplexitySubmitSelectors);
+      }
+
       return { success: true };
     },
   };
@@ -4077,11 +4270,6 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       return true;
     }
 
-    // Respond to PING from background for poll-based injection readiness
-    if (message.type === 'PING') {
-      sendResponse({ alive: true });
-      return true;
-    }
 
     if (message.type === 'DO_INJECT') {
       if (isInjectionActive) {
@@ -4136,6 +4324,8 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       return true;
     }
 
+    // §3.3 Fix: Single canonical PING handler (the duplicate above was removed).
+    // Returns platform so future callers can validate the tab is on the expected site.
     if (message.type === 'PING') {
       sendResponse({ alive: true, platform });
       return true;

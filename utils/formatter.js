@@ -12,10 +12,27 @@ export function formatContextPrompt(context, targetPlatform) {
   // Inner function generates the raw prompt, then we apply truncation tracking
   const rawPrompt = _buildPrompt(context, targetPlatform);
 
-  // Truncation tracking: if the prompt exceeds CHAR_LIMIT, truncate and flag the context
+  // §5.4 Fix: Truncate on message boundaries rather than raw character index to avoid
+  // splitting code fences, tables, or words mid-token.
   if (rawPrompt.length > CHAR_LIMIT) {
     context.truncated = true;
     context.truncatedAt = CHAR_LIMIT;
+
+    // Try to build a truncated version by dropping whole messages from the end
+    if (Array.isArray(context.messages) && context.messages.length > 0) {
+      const truncationNotice = '\n\n⚠️ [Cross Context: Conversation was truncated at ~' + Math.round(CHAR_LIMIT / 4) + ' tokens to fit transfer limits. Some earlier context may be missing.]';
+      // Build a trimmed context with progressively fewer messages until it fits
+      const trimmedContext = { ...context };
+      for (let i = context.messages.length - 1; i >= 0; i--) {
+        trimmedContext.messages = context.messages.slice(0, i);
+        const candidate = _buildPrompt(trimmedContext, targetPlatform);
+        if (candidate.length + truncationNotice.length <= CHAR_LIMIT) {
+          return candidate + truncationNotice;
+        }
+      }
+      // Even zero messages is too long — fall back to raw substring as last resort
+    }
+
     return rawPrompt.substring(0, CHAR_LIMIT) + '\n\n⚠️ [Cross Context: Conversation was truncated at ~' + Math.round(CHAR_LIMIT / 4) + ' tokens to fit transfer limits. Some earlier context may be missing.]';
   }
 
@@ -57,13 +74,10 @@ function _buildPrompt(context, targetPlatform) {
       return arr.map((code, i) => `--- Snippet #${i + 1} ---\n${code}`).join('\n\n');
     };
 
-    // Helper for transcript rendering
-    const transcriptSection = Array.isArray(context.messages) && context.messages.length > 0
-      ? `\n\n---\n\n## 💬 Full Conversation Transcript\n\n` + context.messages.map(m => {
-          const roleHeader = m.role === 'user' ? '### 👤 User' : `### 🤖 ${src}`;
-          return `${roleHeader}\n${m.content}`;
-        }).join('\n\n')
-      : '';
+    // §3.1 Fix: Transcript is now always appended to AI-enhanced branches via the
+    // shared helper below. Previously this variable was computed but never used in
+    // any of the five intent-branch return statements.
+    const transcriptSection = buildTranscriptSection(context, src);
 
     // Detect Dominant Intent
     const types = Array.isArray(e.conversation_type) ? e.conversation_type.map(t => t.toLowerCase()) : [];
@@ -113,7 +127,7 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     if (dominantIntent === 'debugging') {
@@ -148,7 +162,7 @@ ${bulletJoin(e.failed_attempts)}
 ${bulletJoin(e.successful_solutions)}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     if (dominantIntent === 'brainstorming') {
@@ -186,7 +200,7 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     if (dominantIntent === 'research') {
@@ -221,7 +235,7 @@ ${bulletJoin(e.user_preferences)}
 - Knowledge Goal: ${intent}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     if (dominantIntent === 'writing') {
@@ -253,7 +267,7 @@ ${bulletJoin(e.user_preferences)}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
     }
 
     // General fallback
@@ -285,7 +299,7 @@ ${constraints}
 ${pending}
 
 🚀 Please continue from:
-${handoff}`;
+${handoff}${transcriptSection}`;
   }
 
   // ──────────────────────────────────────────────────────────────
@@ -312,6 +326,19 @@ ${transcriptSection}
 
 ---
 Please acknowledge these details. Tell me what tasks you are taking over, and ask me what we should focus on next to continue seamlessly.`;
+}
+
+/**
+ * §3.1 Fix: Shared helper that builds the full verbatim transcript section.
+ * Used by both the AI-enhanced branches and the standard fallback.
+ */
+function buildTranscriptSection(context, src) {
+  if (!Array.isArray(context.messages) || context.messages.length === 0) return '';
+  return `\n\n---\n\n## 💬 Full Conversation Transcript\n\n` +
+    context.messages.map(m => {
+      const roleHeader = m.role === 'user' ? '### 👤 User' : `### 🤖 ${src}`;
+      return `${roleHeader}\n${m.content}`;
+    }).join('\n\n');
 }
 
 /**
