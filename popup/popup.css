@@ -23,7 +23,7 @@
   --accent-light:  #f59e0b;
   --accent-glow:   rgba(245, 158, 11, 0.12);
   --accent-gradient: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  --ai-gradient:    linear-gradient(135deg, #8b5cf6 0%, #d946ef 50%, #06b6d4 100%);
+  --ai-gradient:    linear-gradient(135deg, #f59e0b 0%, #ea580c 50%, #d97706 100%);
 
   --claude:        #f97316; /* Vibrant Terracotta */
   --chatgpt:       #10b981; /* Emerald */
@@ -530,7 +530,7 @@ body {
   background-size: 200% 200%;
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 4px 18px rgba(139, 92, 246, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 18px rgba(245, 158, 11, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   animation: aiGradientShift 4s ease infinite;
 }
 
@@ -542,7 +542,7 @@ body {
 
 .btn-capture.btn-primary:hover:not(:disabled) {
   transform: translateY(-1px) scale(1.01);
-  box-shadow: 0 6px 24px rgba(217, 70, 239, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  box-shadow: 0 6px 24px rgba(234, 88, 12, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 .btn-capture:active:not(:disabled) {
@@ -1350,18 +1350,18 @@ body {
 /* Primary Button - AI Scrape (Redesigned for Ultimate Visibility and POP) */
 .btn-capture.btn-primary {
   /* Dynamic gradient matching generative AI motif */
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%);
+  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 50%, #d97706 100%);
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.45), 0 0 10px rgba(234, 88, 12, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 .btn-capture.btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #5c53fc 0%, #8b4cfc 50%, #eb3b87 100%);
+  background: linear-gradient(135deg, #fbbf24 0%, #f97316 50%, #ea580c 100%);
   color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.4);
-  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.55), 0 0 12px rgba(219, 39, 119, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 6px 22px rgba(245, 158, 11, 0.6), 0 0 14px rgba(234, 88, 12, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.45);
   transform: translateY(-1px);
 }
 
