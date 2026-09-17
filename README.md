@@ -9,10 +9,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](manifest.json)
 [![Manifest Version](https://img.shields.io/badge/Manifest-V3-orange.svg)](manifest.json)
+[![Zero Cloud](https://img.shields.io/badge/Cloud-100%25%20Local-purple.svg)](docs/architecture.md)
 
 <p align="center">
-  <br>
-  <b>Supported Platforms:</b><br><br>
   <a href="https://chatgpt.com"><img src="https://img.shields.io/badge/ChatGPT-74aa9c?style=for-the-badge&logo=openai&logoColor=white" alt="ChatGPT"></a>
   <a href="https://claude.ai"><img src="https://img.shields.io/badge/Claude-d97706?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude"></a>
   <a href="https://gemini.google.com"><img src="https://img.shields.io/badge/Gemini-8b5cf6?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini"></a>
@@ -20,516 +19,167 @@
   <a href="https://perplexity.ai"><img src="https://img.shields.io/badge/Perplexity-20B2AA?style=for-the-badge&logo=perplexity&logoColor=white" alt="Perplexity"></a>
 </p>
 
-Cross Context is an open source browser extension and intelligent context portability framework. It enables seamless conversation migration, state restoration, and multi platform continuity across major LLM interfaces without manual copy-pasting or loss of momentum.
+---
+
+## 📖 What is Cross Context?
+
+**Cross Context** is an open-source browser extension that eliminates AI vendor lock-in and context fragmentation. When you hit rate limits, context window caps, or want to leverage a different model's strengths, Cross Context captures your active session state and transfers it seamlessly into your target AI platform.
+
+Everything runs **100% locally** in your browser sandbox without remote servers, subscription fees, or data collection.
 
 ---
 
-## 📖 Introduction
+## ✨ Key Features
 
-In the current era of LLM utility, developers and power users operate in a multi model landscape. Different models excel at different tasks: Claude is preferred for complex codebase refactoring, ChatGPT for fast logical prototyping, Gemini for large context analysis, and Perplexity for real-time web retrieval. 
-
-However, users are constantly bottlenecked by platform specific restrictions such as free-tier usage caps, context window limits, conversation truncation, and vendor lock-in. When a limit is hit, migrating a session to another platform is painful. It requires manual parsing, copying text fragments, re-explaining architectural rules, re-uploading file trees, and re-pasting error logs. 
-
-Cross Context addresses this gap. It serves as a local, privacy-first context portability layer. It reads the current session's DOM, filters out interface noise, compresses low-priority turns, and generates a structured handoff prompt. This prompt is then dynamically injected into the target platform's input field, allowing the conversation to continue with zero friction.
-
----
-
-## 🛑 Problem Statement
-
-Modern AI workflows suffer from **context fragmentation**. When you switch from one LLM platform to another, you lose the semantic progress you have built. The friction points include:
-
-1. **Information Loss**: Standard copy-paste procedures skip code block metadata, ignore assistant-versus-user turn structures, and omit critical intermediate reasoning steps.
-2. **Cognitive Restart Costs**: Developers spend significant time writing meta-prompts (e.g., "Here is my project background, tech stack, and what we just tried...") just to bring a new LLM up to speed.
-3. **Usage Limit Disruptions**: Mid-task rate limits (such as Claude's 5-hour message caps) halt work. Rebuilding the state in ChatGPT or Gemini manually breaks developer flow.
-4. **Token Waste**: Copying entire raw conversations wastes input tokens on boilerplate text, duplicate code snippets, and conversational greetings, resulting in higher latency and premature context truncation on the target platform.
+- 🔄 **Cross-LLM Continuity:** Instantly migrate conversations between Claude, ChatGPT, Gemini, Grok, and Perplexity.
+- 📄 **File-Based Context Injection:** Generates in-memory `context.md` files attached directly to target uploaders via the HTML5 `DataTransfer` API, avoiding bloated chat prompts.
+- 🧠 **Optional AI Distillation:** Two-pass Gemini synthesis extracts technical facts, active bugs, and architectural decisions, appending the verbatim transcript underneath.
+- ⚡ **Zero-Thrashing Scraping:** Parses single-page chat UIs with scoped CSS hiding rules that prevent browser layout thrashing and UI jitter.
+- 🏷️ **Sequential Context IDs:** Uniquely tags each snapshot (`con_01`, `con_02`) to prevent target models from confusing project histories.
+- ✂️ **Boundary-Safe Truncation:** Respects safe transfer budgets by trimming older turns on whole message boundaries, preventing split code fences.
+- 🧩 **Multi-Session Merger:** Select multiple saved context snapshots and synthesize them into a unified project briefing.
+- 🛡️ **Privacy-First & Secure:** Strict host permissions, no third-party tracking, and built-in SSRF guards against malicious internal IP URLs.
 
 ---
 
-## 🎯 Vision
+## 🚀 Quick Start
 
-The long-term goal of Cross Context is to establish a **universal context layer** for AI interactions. The vision spans:
+### 1. Installation
 
-* **Model Agnostic Memory**: A standard format for serializing conversation state, requirements, preferences, and progress.
-* **Semantic Portability**: Decoupling the user's ongoing session memory from any single host interface.
-* **Local-First Synchronization**: Creating offline memory stores where users maintain full control over their interaction graphs.
-* **Agentic Continuity**: Allowing different specialized autonomous agents to inherit and hand off complex multi-step tasks to one another.
-
----
-
-## ⚡ Key Features
-
-* **Cross-LLM Context Transfer**: Move conversations dynamically between Claude, ChatGPT, Gemini, Grok, and Perplexity.
-* **Full Transcript Preserved in AI-Enhanced Handoffs**: Grounded multi-pass Gemini synthesis automatically appends the verbatim conversation history beneath AI-distilled briefs across all intent categories (coding, debugging, research, brainstorming, writing, general).
-* **Gemini 3.5 & 3.6 Flash API Support**: Integrated with Google's latest GA models (`gemini-3.5-flash` and `gemini-3.6-flash`), featuring custom model validation and friendly error handling.
-* **Redesigned Glassmorphic Toast Engine**: Floating pill notifications with dark glassmorphism (`backdrop-filter: blur(20px)`), glowing status SVG badges (`success`, `error`, `warning`, `info`), spring entrance/exit physics, animated progress timer bar, and instant click-to-dismiss.
-* **File-Based Context Injection (`context.md`)**: Generates an in-memory Markdown file (e.g. `context-con_01.md`) and uses the HTML5 `DataTransfer` API and file drop simulation to attach context directly into target LLM file uploaders, with graceful fallback to plain text pasting.
-* **Upload Readiness Polling (`waitForFileUploadComplete`)**: Actively monitors host platform DOM attachment chips (`[data-testid="file-chip"]`, `uploader-file-chip`, etc.) to verify file attachments finish uploading before typing companion text or submitting.
-* **Sequential Context ID System (`con_01`, `con_02`...)**: Generates human-friendly sequential Context IDs for clear context tracking, file naming, and multi-session management.
-* **Multi-Session AI System Instructions**: Embeds explicit system instructions (`> ⚠️ SYSTEM INSTRUCTION FOR RECEIVING AI MODEL...`) and prompt companion text (`(Context ID: con_01)`) to prevent target LLMs from confusing or merging memory states across different context files.
-* **Multi-Context Session Merger**: Allows selecting multiple saved contexts (`con_01` + `con_02`) and synthesizing them into a new unified context session (`con_03`) combining transcripts, tech stacks, and architectural decisions.
-* **Estimated Token Counter & Model Fit Badge**: Calculates real-time estimated tokens (`Math.ceil(length / 4)`) and renders color-coded compatibility badges (`⚡ ~2.4k tokens`) inside the `context.md Preview` card.
-* **`context.md Preview` Modal Component**: Dedicated preview tab in the Chrome extension popup displaying a file header card, Context ID badge, Copy Markdown button, Download `.md` button, and dark code viewer.
-* **Visual Attachment Mode Badges**: Renders prominent glowing badges (`📄 Attached context-con_01.md` vs `📝 Text Paste Fallback`) in the floating preview overlay on target pages.
-* **Intelligent & Zero-Thrashing Scraping Engine**: DOM parsing scripts custom-tailored for each LLM interface. Employs `WeakMap` text caching and temporary CSS rule injection (`.cc-scraping-active`) to clean out UI chrome, copy buttons, and toolbars before processing without layout thrashing.
-* **Smart Context Extraction**: Recovers hierarchical markdown structures from raw HTML, preserving code blocks, tables, lists, and headers.
-* **AI-Enhanced Summarization**: Optional integration with Gemini's API to distill long transcripts into dense, high-level developer specifications.
-* **Deterministic Context Scoring**: Local heuristic algorithm that rates messages based on information density (errors, requirements, decisions, code vs fluff).
-* **Concept Deduplication**: Algorithmic deduplication using Jaccard similarity metrics to prevent repeating code blocks or redundant instructions.
-* **One-Click Handoff & Injection**: Automated workflow that opens the target platform, waits for DOM readiness, and programmatically injects the structured state file and companion text.
-* **Dynamic Scroll-to-Load**: Heuristic viewport controller that scroll-loads virtualized lists in long chat logs to capture full conversation history.
-* **Base64 Media Extraction**: Detects, fetches, bypasses CORS, compresses, and base64-encodes SVGs and images within the conversation to preserve visual context with SSRF protection.
-
----
-
-## 🏗️ System Architecture
-
-Cross Context is built as a highly decoupled browser extension utilizing Chrome Extension Manifest V3. The system consists of the following primary layers:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                           UI Layer                              │
-│         Popup UI (popup.js, popup.html, popup.css)             │
-└────────────────┬────────────────────────────────────────────────┘
-                 │ (Chrome Runtime Messaging)
-┌────────────────▼────────────────────────────────────────────────┐
-│                        Background Layer                         │
-│             Background Service Worker (background.js)           │
-│                 ├── Storage Controller (storage.js)             │
-│                 └── Gemini API Enhancement Client               │
-└────────────────┬────────────────────────────────────────────────┘
-                 │ (Script Injection & Port Messaging)
-┌────────────────▼────────────────────────────────────────────────┐
-│                         Content Script                          │
-│            Content Dispatcher & Orchestrator (content.js)       │
-│                 ├── Scraping Engine (scrapers/*)                │
-│                 └── Injection Engine (injectors/*)              │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Component Details
-1. **Popup UI**: The user interface. It detects if the active tab is a supported LLM, allows configuring settings (like Gemini API keys), lists saved session snapshots, and coordinates transfer targets.
-2. **Background Service Worker**: The orchestrator. It manages the chrome local storage backend, fetches external images to bypass CORS restriction, and runs the asynchronous Gemini API enhancement pipeline to summarize raw histories in the background.
-3. **Content Script Dispatcher**: Injected into the target LLM webpages. It listens for messages from the popup, triggers target scrapers or injectors, and manipulates the page DOM.
-4. **Scraping Engine**: Platform-specific scripts that parse specialized DOM trees (e.g., ChatGPT's conversation articles vs Claude's message containers).
-5. **Injection Engine**: Specialized modules designed to insert text into complex editor interfaces (ProseMirror, textarea, draft.js) and simulate human submission events.
-6. **Context Intelligence & Formatting Engine**: Common utilities that score messages, perform deduplication, extract key files, build semantic memory graphs, and format final prompts.
-
----
-
-## 📊 Architecture Diagrams
-
-### 1. High-Level Architecture
-This diagram traces the flow from scraping the source LLM interface to injecting into the target LLM workspace:
-
-```mermaid
-graph TD
-    User([User clicks transfer]) --> Popup[Popup UI]
-    Popup -->|Ping & Execute| Content[Content Script Dispatcher]
-    Content -->|Scrape DOM| Scraper[Platform Scraper]
-    Scraper -->|Extract Markdown & Media| Clean[Data Cleaning & Media Base64 Serialization]
-    Clean -->|Return Context Object| Content
-    Content -->|Save Snapshot| BG[Background Service Worker]
-    BG -->|Query API Key| Storage[(Chrome Local Storage)]
-    
-    %% Optional Path
-    BG -.->|Optional AI Enhancement| Gemini[Gemini Distillation API]
-    Gemini -.->|Distilled JSON Packet| BG
-    
-    BG -->|Generate Prompt| Formatter[Context Formatter]
-    Formatter -->|Launch Target Tab| TargetTab[New LLM Tab]
-    BG -->|Store Handoff State| Storage
-    
-    TargetTab -->|Load Injection Script| TargetContent[Target Content Script]
-    Storage -->|Read Handoff State| TargetContent
-    TargetContent -->|DOM Discovery| Injector[Platform Injector]
-    Injector -->|Inject & Simulate Event| Input[Target Input Element]
-    Input -->|Auto-Submit| Restored[Restored Continuity Session]
-```
-
-### 2. Scraping Engine Workflow
-The scraping pipeline handles scrolling, DOM readiness, sanitization, and asset optimization:
-
-```mermaid
-graph TD
-    Start[Trigger Scrape] --> WaitDOM[Wait for DOM Settlement via MutationObserver]
-    WaitDOM --> Scroll[Auto-Scroll to Top for Virtualized Lists]
-    Scroll --> Query[Run Selector Fallbacks data-role -> class -> semantic]
-    Query --> Filter[Filter Input Areas, Footers, Navbars & Sidebars]
-    Filter --> Parse[Parse Message Bubbles]
-    
-    Parse -->|Markdown Compiler| MD[Convert HTML elements to structural Markdown]
-    Parse -->|Image Extractor| Media[Locate SVGs & Images]
-    
-    Media --> CORS[Proxy fetch via Background worker to bypass CORS]
-    CORS --> Compress[Resize to 1024px, compress to 0.82 JPEG quality]
-    Compress --> DataUrl[Base64 Data URI]
-    
-    MD & DataUrl --> Combine[Assemble Context JSON Object]
-    Combine --> End[Scrape Completed]
-```
-
-### 3. Injection Engine Pipeline
-Injecting into dynamic single-page applications (SPAs) requires navigating custom document models:
-
-```mermaid
-graph TD
-    Start[Trigger Inject] --> QueryInput[Query Target Input Element via Selector Heuristics]
-    QueryInput --> Focus[Focus & click target element]
-    Focus --> CheckType{Textarea vs contenteditable?}
-    
-    CheckType -->|Textarea| SetTextarea[Insert text via document.execCommand]
-    SetTextarea --> VerifyValue{Verification matches?}
-    VerifyValue -->|No| NativeSetter[Invoke Native HTMLTextAreaElement setter prototype]
-    
-    CheckType -->|contenteditable| SelRange[Select node range via window.getSelection]
-    SelRange --> SetCE[Insert text via execCommand]
-    SetCE --> VerifyCE{Verification matches?}
-    VerifyCE -->|No| InnerHTML[Fallback to setting innerText directly]
-    
-    VerifyValue & VerifyCE & NativeSetter & InnerHTML --> Dispatch[Dispatch input & change bubble events]
-    Dispatch --> Delay[Pause 1200ms to allow host JS evaluation]
-    Delay --> Submit{Submit button active?}
-    Submit -->|Yes| ClickBtn[Click send button element]
-    Submit -->|No| EnterKey[Dispatch Enter keyboard event]
-    ClickBtn & EnterKey --> Done[Continuity Restored]
-```
-
----
-
-## 🔁 Detailed Workflow
-
-1. **Session Scraping Initiated**: The user clicks "Scrape Context" in the extension popup while viewing an active LLM chat.
-2. **DOM Stabilization**: The script invokes a `MutationObserver` on the viewport to wait for DOM mutations to settle, ensuring streaming answers are completed.
-3. **Virtualized List Loading**: Heuristic scrolls are executed to load older segments of the thread.
-4. **DOM Extraction**: Content script queries message nodes using priority selectors, filtering navigation bars and textboxes.
-5. **Markdown Reconstruction**: The HTML nodes are translated into clean Markdown, preserving tables, code blocks, lists, and formatting.
-6. **Media Optimization**: SVG assets are rendered to Canvas and compiled into PNG data URIs. Inline image URLs are retrieved via the background proxy, optimized to 1024px JPEG, and converted to base64.
-7. **Deduplication & Formatting**: The context formatting engine runs Jaccard similarity metrics to strip repeating code or text and builds a structured handoff briefing.
-8. **Handoff Packaging & ID Assignment**: A context snapshot is created and assigned a sequential Context ID (e.g. `con_01`). A complete, structured Markdown file (`context-con_01.md`) containing metadata, AI system instructions, project briefing, and full conversation transcript is saved to local storage.
-9. **Target Launch**: The background script opens a tab loading the user-chosen target LLM.
-10. **Target Injection & File Attachment**: Upon tab load completion, the injection engine locates the uploader, creates an in-memory `File` (`context-con_01.md`), and attaches it via the `DataTransfer` API and drag-and-drop simulation. It then types a companion instruction in the text input box referencing `(Context ID: con_01)`.
-11. **Session Restored**: The target LLM reads the attached `context-con_01.md` file, processes the embedded Context ID and briefing, and resumes the task without breaking pair-programming context.
-
----
-
-## 🧠 Context Engineering System
-
-The context engineering module handles optimization and compression to ensure the transfer prompt is highly effective and fits easily within typical LLM system contexts.
-
-### Priority Heuristics
-The local context engine runs a keyword classifier on every scraped turn:
-
-* **High-Priority Match (Score +1.5 to +3.0)**: Matches patterns: `requirement`, `architecture`, `technical decision`, `todo`, `unresolved`, `error`, `bug`, `config`, or code blocks (` ``` `).
-* **Low-Priority Match (Score -2.0)**: Matches patterns: `hello`, `hi`, `thank you`, `awesome`, `fluff`, or basic affirmations like `ok`, `yes`.
-* **Baseline Scores**: Users receive a default baseline of 6, while Assistant responses start at 5. The engine caps scores between 1 and 10. Messages scoring $\ge 6$ are added to priority memory.
-
-### Algorithmic Deduplication
-To prevent transferring multiple versions of a file that was iteratively debugged, the system uses a **Jaccard Similarity Coefficient** analyzer:
-
-$$J(A, B) = \frac{|A \cap B|}{|A \cup B|}$$
-
-For any two text fragments $A$ and $B$, the engine splits the strings into sets of words (minimum length of 3 characters, ignoring case and symbols). If the similarity index exceeds `0.45`, or if one fragment is a substring inclusion of the other, the shorter version is discarded. This keeps only the most complete, updated code or architectural instructions in the packet.
-
----
-
-## 🕷️ Scraping Engine Details
-
-Each AI platform presents a unique UI structure. The scraping scripts use custom selectors and structural heuristics:
-
-```js
-// Example ChatGPT Selector Fallbacks
-const SELECTORS = [
-  '[data-message-author-role]',
-  'article',
-  '.whitespace-pre-wrap',
-  '.markdown'
-];
-```
-
-### Platform Scrapers
-* **ChatGPT**: Reads `data-message-author-role` directly. Recovers prose via `.markdown` classes and prompts via `.whitespace-pre-wrap` fields.
-* **Claude**: Selects message blocks using `font-claude-message` or `.font-user-message`. Handles structured text trees carefully to isolate user attachments from the textual prompt.
-* **Gemini**: Traverses elements matching `message-content` tags. Extracts formatted text, removing secondary suggestion chips.
-* **Grok**: Scrapes conversation divs on `grok.com` or `x.com/i/grok`. Filters out social feed elements.
-* **Perplexity**: Isolates search steps and answer boxes, converting citations (e.g. `sup` tags) into inline markdown links.
-
-### Shadow DOM and Virtual Lists
-For interfaces nested inside Shadow Roots, the scraper uses a recursive traversal script. If it detects a virtualized scroll container, it reads the viewport heights, scroll position, and performs a controlled, layout-friendly scroll to the top to force rendering of lazy-loaded DOM elements before running extraction.
-
----
-
-## 💉 Injection Engine Details
-
-Cross Context supports **Dual-Mode Context Injection**: File Attachment Mode (`context.md`) and Fallback Text Mode.
-
-### 1. File Attachment Mode (`attachMarkdownFile`)
-Rather than pasting huge blocks of text directly into input fields, Cross Context creates an in-memory `File` object (`context-con_01.md`) and attaches it directly to the target platform's file uploader:
-- **DataTransfer API & File Inputs**: Finds file inputs (`input[type="file"]`) or drop targets and populates `files` via `DataTransfer`.
-- **Drag & Drop Simulation**: Dispatches synthetic `dragenter`, `dragover`, and `drop` events with custom `DataTransfer` payloads for canvas/dropzone areas.
-- **Upload Readiness Polling (`waitForFileUploadComplete`)**: Actively polls for platform DOM attachment chips (e.g. `[data-testid="file-chip"]`, `uploader-file-chip`) to ensure the host platform completes file processing before typing text or submitting.
-- **Visual Mode Overlay Badge**: Displays glowing visual mode badges (`📄 Attached context-con_01.md` vs `📝 Text Paste Fallback`) in the floating preview overlay on target pages.
-- **Companion Prompt Injection**: Once the file is attached and verified, the injector programmatically types a companion prompt into the text editor referencing the Context ID:
-  > *"Please read the attached context-con_01.md (Context ID: con_01) and continue from where we left off..."*
-
-### 2. Fallback Text Mode & SPA State Overrides
-If file attachment is not supported or rejected, the injection script falls back to text insertion:
-1. **Selection & Focus**: It focuses and dispatches a mouse click to the input element.
-2. **Text Simulation**: It attempts insertion using `document.execCommand('insertText', false, text)`. This fires standard React text-listener states naturally.
-3. **Native Setters Callback**: If `execCommand` fails or the element is not updated, the injector grabs the native input or textarea property setter from the window prototype chain:
-   ```js
-   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-   setter.call(input, text);
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Shriraj888/Cross-Context.git
+   cd Cross-Context
    ```
-4. **Event Dispatching**: The injector dispatches synthetic `input` and `change` events with bubble propagation enabled to force the virtual DOM state to sync.
-5. **Execution Simulation**: It displays a floating preview confirmation overlay, waits 1200ms for state reconciliation, locates the submit button, and submits the prompt.
+2. **Open Extensions page:** Navigate to `chrome://extensions/` in Chrome, Brave, Edge, or Opera.
+3. **Enable Developer Mode:** Toggle the **Developer mode** switch in the top-right corner.
+4. **Load Unpacked:** Click **Load unpacked** in the top-left corner and select the cloned `Cross-Context` directory.
 
 ---
 
-## 🧠 AI Enhancement Pipeline
-
-If a user configures a Gemini API key in the extension settings, Cross Context changes its default scraping action from a deterministic parser to an active AI Distillation flow.
+## 🎯 How to Use
 
 ```
-                  ┌──────────────────────────────┐
-                  │ Scraped Raw Conversation DOM │
-                  └──────────────┬───────────────┘
-                                 │
-                                 ▼
-                  ┌──────────────────────────────┐
-                  │ Token-Optimization & Fluff   │
-                  │   Filtering in Service Worker│
-                  └──────────────┬───────────────┘
-                                 │
-                                 ▼
-                  ┌──────────────────────────────┐
-                  │  Pass 1: Focused Facts API   │
-                  └──────────────┬───────────────┘
-                                 │
-                                 ▼
-                  ┌──────────────────────────────┐
-                  │  Pass 2: Synthesis API Call  │
-                  └──────────────┬───────────────┘
-                                 │
-                                 ▼
-                  ┌──────────────────────────────┐
-                  │ Distilled Structured Context │
-                  │       JSON Generation        │
-                  └──────────────────────────────┘
+ ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+ │ 1. Scrape State │  ──>  │ 2. Pick Target  │  ──>  │ 3. Auto-Restore │
+ │   (Claude / AI) │       │ (e.g. ChatGPT)  │       │  (File Attached)│
+ └─────────────────┘       └─────────────────┘       └─────────────────┘
 ```
 
-To eliminate semantic drift and ensure high accuracy under complex schema properties, the distillation flow utilizes a **Two-Pass Sequential Pipeline**:
-
-1. **Preprocessing**: The background script compresses the transcript, stripping conversational greetings from old turns and truncating older code blocks to optimize the token payload.
-2. **Pass 1 — Technical Facts Extraction**: A focused, compact JSON schema is dispatched to the Gemini API along with raw chat content. The model extracts objective details with high precision, including:
-   - `technical_stack` (languages, frameworks, DBs)
-   - `errors_and_issues` (unresolved errors, traceback dumps)
-   - `architecture_decisions` (architectural patterns, design choices)
-   - `pending_tasks` (checklist items, active goals)
-   - `important_code` (active syntax snippets and configurations)
-   - `files_mentioned` (impacted files/directory structure)
-   - `user_preferences` (expressed preferences, coding guidelines)
-3. **Pass 2 — Grounded Context Synthesis**: The raw transcript is combined with the high-fidelity structured facts extracted in Pass 1 as a single input prompt. This second Gemini call synthesizes the high-level properties, generating:
-   - A concise context `title` (max 6-8 words)
-   - A grounded `project_summary` and `current_task`
-   - An optimized `handoffPrompt` constructed in the **first-person user voice** (e.g., *"I was working on X. Here is the state... please continue by..."*), avoiding robotic third-person meta-context.
-4. **Structured Integration**: The service worker merges synthesized properties and extracted facts into a unified schema payload. This maintains 100% backward-compatibility with downstream UI components and tab injectors.
+1. **Open an Active Chat:** Open any ongoing conversation on Claude, ChatGPT, Gemini, Grok, or Perplexity.
+2. **Capture Context:** Click the **Cross Context** toolbar icon and select **Scrape Context** (or **AI Handoff** if Gemini API is configured).
+3. **Select Target Platform:** Choose your destination AI from the target buttons.
+4. **Click Transfer:** Cross Context opens the destination tab, attaches `context-con_01.md`, types the companion handoff prompt, and restores continuity with zero copy-pasting.
 
 ---
 
-## 🛠️ Tech Stack
+## ⚙️ Configuration (Optional AI Synthesis)
 
-* **Extension Architecture**: WebExtensions Manifest Version 3 (compatible with Google Chrome, Microsoft Edge, Brave, and Opera).
-* **UI Layer**: Vanilla HTML5, CSS3 Custom Properties (variables), and ES modules. No external UI libraries to keep the bundle footprint minimal.
-* **Storage Provider**: `chrome.storage.local` API for fast local snapshots.
-* **Core Languages**: Modern Vanilla ECMAScript (ES6+) with async-await concurrency patterns.
-* **API Integration**: Native HTTPS fetch calling Google AI Studio Gemini API endpoints.
+To enable Gemini-powered distillation alongside verbatim transcripts:
+1. Click the **Settings (⚙️)** icon in the popup header.
+2. Enter your [Google AI Studio Gemini API Key](https://aistudio.google.com/).
+3. Select your model: `gemini-3.5-flash` (recommended default) or `gemini-3.6-flash`.
+4. Click **Save Settings**.
 
 ---
 
-## 📂 Folder Structure
+## 🏗️ Architecture Overview
+
+Cross Context is designed around Chrome MV3's native separation of concerns:
+
+```
+┌────────────────────────────────────────────────────────┐
+│ UI Layer: Popup (popup.html, popup.js, popup.css)      │
+└───────────────────────────┬────────────────────────────┘
+                            │ chrome.runtime.sendMessage
+┌───────────────────────────▼────────────────────────────┐
+│ Background Layer: Service Worker (background.js)       │
+│ • Storage Controller  • Image Proxy  • Gemini Pipeline │
+└───────────────────────────┬────────────────────────────┘
+                            │ chrome.scripting
+┌───────────────────────────▼────────────────────────────┐
+│ Content Layer: Single-File Dispatcher (content.js)     │
+│ • DOM Scrapers  • Dual-Mode Injector  • Shadow Overlay │
+└────────────────────────────────────────────────────────┘
+```
+
+*For complete technical architectural details and sequence diagrams, see [docs/architecture.md](docs/architecture.md).*
+
+---
+
+## 📂 Project Structure
 
 ```text
-cross-context/
-├── manifest.json              # Extension metadata, permissions, and entry configurations
-├── background.js              # Service worker managing state, proxy fetches, and Gemini API calls
-├── LICENSE                    # Software license terms
-├── icons/                     # Brand image files in various sizes
+Cross-Context/
+├── manifest.json              # Extension metadata and MV3 permission declarations
+├── background.js              # Service worker managing state, proxy fetches, and AI pipeline
+├── LICENSE                    # MIT License
+├── README.md                  # Project overview and quick start guide
+├── CONTRIBUTING.md            # Contributor workflows and selector maintenance guidelines
+├── CHANGELOG.md               # Version release history
+├── icons/                     # Extension branding and toolbar icons
 │   ├── icon16.png
 │   ├── icon48.png
-│   └── icon128.png
-├── content/                   # Scripts executing inside target LLM page contexts
-│   └── content.js             # Main single-file content script (scrapers, injectors, DOM resilience, preview overlay)
-├── popup/                     # User interface layout and styles
-│   ├── popup.html             # HTML layout for popup interface
-│   ├── popup.css              # Custom styled popup window CSS with toast animations
-│   └── popup.js               # Event handlers, local state controllers, and toast engine
-└── utils/                     # Common utility modules
-    ├── formatter.js           # Prompt formatters, transcript integration, and truncation helpers
-    └── storage.js             # Local Chrome storage wrappers
+│   ├── icon128.png
+│   └── logo.png
+├── content/                   # Scripts running in target LLM page contexts
+│   └── content.js             # Monolithic content script (scrapers, injectors, preview overlay)
+├── popup/                     # Obsidian & electric cyan user interface
+│   ├── popup.html             # Popup DOM structure
+│   ├── popup.css              # Custom styling, toast animations, and radar scanner
+│   └── popup.js               # Event controllers, context cards, and settings modal
+├── utils/                     # Modular helpers
+│   ├── formatter.js           # Markdown prompt assembly and message-boundary truncation
+│   └── storage.js             # Async storage wrappers for runtime messaging
+└── docs/                      # Technical deep-dive documentation
+    ├── architecture.md        # Detailed 3-layer architecture & Mermaid diagrams
+    ├── context-engineering.md # Scoring heuristics, Jaccard dedup & token safety
+    ├── ai-enhancement-pipeline.md # Two-pass Gemini distillation & schema specifications
+    ├── scraping-engine.md     # Platform selectors, DOM resilience & media extraction
+    ├── injection-engine.md    # File drop DataTransfer simulation & fallback text injection
+    ├── troubleshooting.md    # Common errors, model fixes, and debugging FAQ
+    └── api-reference.md       # Internal runtime message contracts and storage schemas
 ```
 
 ---
 
-## 💾 Installation Guide
+## 📚 Technical Documentation
 
-Since the extension is under development, load it locally using Developer Mode:
+Explore deep dives on each subsystem:
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/yourusername/cross-context.git
-   cd cross-context
-   ```
-2. **Open Extensions Dashboard**:
-   Open Google Chrome or a Chromium-based browser and navigate to `chrome://extensions/`.
-3. **Enable Developer Mode**:
-   Toggle the **Developer mode** switch in the top-right corner to **ON**.
-4. **Load the Extension Folder**:
-   * Click **Load unpacked** in the top-left corner.
-   * Select the root directory containing the `manifest.json` file.
-5. **Verify Installation**:
-   The Cross Context icon should now be visible in your extensions toolbar. Click it to open the control panel.
+| Document | Description |
+|----------|-------------|
+| 🏛️ [Architecture](docs/architecture.md) | High-level model, message routing, and security boundaries |
+| 🧠 [Context Engineering](docs/context-engineering.md) | Priority scoring, Jaccard deduplication, and boundary-safe truncation |
+| ⚡ [AI Enhancement Pipeline](docs/ai-enhancement-pipeline.md) | Two-pass Gemini extraction, model lifecycle, and transcript preservation |
+| 🕷️ [Scraping Engine](docs/scraping-engine.md) | Platform selector matrices, zero-thrashing CSS, and media proxying |
+| 💉 [Injection Engine](docs/injection-engine.md) | HTML5 `DataTransfer` file drop mode, SPA state sync, and Shadow DOM |
+| 🛠️ [Troubleshooting & FAQ](docs/troubleshooting.md) | Solutions for selector shifts, HTTP 404s, rate limits, and storage quotas |
+| 📨 [Internal API Reference](docs/api-reference.md) | Complete runtime message contracts, data schemas, and storage keys |
 
 ---
 
-## 🚀 Usage Guide
+## 🗺️ Roadmap
 
-### Real-World Scenario: Migrating from Claude to ChatGPT
-
-```
-   CLAUDE (Usage Limit Reached)                   CHATGPT (Continuous Flow)
- ┌───────────────────────────────┐              ┌───────────────────────────────┐
- │ Scraped conversation:         │              │                               │
- │ - React frontend              │   Transfer   │ Injected handoff prompt:      │
- │ - Redux state mismatch        │ ───────────> │ - Target file: store.js       │
- │ - Active bug in store.js      │              │ - Error log: TypeError...     │
- │ - Attempted solution failed   │              │ - Restored state briefing     │
- └───────────────────────────────┘              └───────────────────────────────┘
-```
-
-1. **Work in Source Model**: Imagine you are developing a project in Claude. You have discussed your tech stack, created React components, hit a `TypeError` in your state manager, and attempted two different bug fixes.
-2. **Reach Platform Limits**: You hit Claude's hourly limit.
-3. **Capture State**:
-   * Click the **Cross Context** icon in the toolbar.
-   * Select **Scrape Context**. The extension will parse the DOM and save a structured snapshot.
-4. **Handoff Target selection**:
-   * In the popup, choose **ChatGPT** as your target.
-   * Click **Transfer**.
-5. **Context Restored**:
-   * Cross Context opens a new ChatGPT tab.
-   * The injection script focuses the prompt textbox and inputs the structured handoff packet.
-   * ChatGPT processes the packet and outputs: *"I see we are debugging a React project using Redux, and we need to resolve the state mismatch in store.js after the reducer change failed. Let's fix this now..."*
-
----
-
-## 📄 Example Context Packet
-
-Below is the structure of the serialized context packet generated by the `ContextIntelligenceEngine`:
-
-```json
-{
-  "system_context": "Deterministic State Restoration & Continuity Protocol — Version 2.0",
-  "priority_memory": [
-    "[Score 9/10] TypeError: Cannot read properties of undefined (reading 'reducer') at store.js:24",
-    "[Score 8/10] We need to make sure the root reducer has the userSlice registered correctly.",
-    "[Score 7/10] Attempted to fix by importing userReducer from './userSlice.js' but it resulted in a circular dependency."
-  ],
-  "active_tasks": [
-    "Fix state mismatch in store.js",
-    "Add test suite for root reducer loading"
-  ],
-  "unresolved_issues": [
-    "Circular dependency during slice registration",
-    "store.js error on application bootstrap"
-  ],
-  "important_decisions": [
-    "Decided to use Redux Toolkit slice architecture",
-    "Using configureStore from @reduxjs/toolkit"
-  ],
-  "execution_context": {
-    "topics_discussed": ["react", "redux", "javascript", "typescript"],
-    "problems_solved": ["Configured devTools setting for dev environments"],
-    "approaches_to_avoid": ["Direct store mutation in root element"],
-    "current_focus": "Fix state mismatch in store.js"
-  },
-  "user_preferences": [
-    "Prefers functional components and hooks",
-    "Uses TypeScript strict mode"
-  ]
-}
-```
-
----
-
-## ⚡ Performance & Reliability Considerations
-
-* **DOM Layout Thrashing**: Scraping queries run through a temporary styling phase that hides non-content elements in one pass. This allows extracting raw text via `innerText` without triggering multiple browser reflow passes.
-* **Token Overhead & Message-Boundary Truncation**: Distillation limits code snippet arrays to a maximum of 5 blocks, and older code sections are truncated. Context prompts that exceed transfer safety limits (`CHAR_LIMIT = 80,000` chars) are trimmed on whole message boundaries (oldest first) to ensure code blocks and markdown tables are never cut mid-token.
-* **SSRF-Adjacent Safe Image Proxy (`isSafeImageUrl`)**: When fetching image attachments to bypass page CORS limits, the background worker validates URLs before fetching, rejecting non-HTTPS protocols, `localhost`, `127.0.0.1`, link-local metadata addresses (`169.254.x.x`), and RFC 1918 private IP ranges.
-* **Storage Quota Auto-Recovery & Eviction Toast**: Handles local storage limits safely. If saving a new context exceeds the 10-context limit, the oldest context is automatically evicted and a user-facing toast notification (`ℹ️ Oldest context removed to make room: "X"`) is displayed. If chrome storage quota is exceeded, `evictImagesForQuota` dynamically strips heavy base64 images while preserving conversation text.
-* **Resilient Tab Injection Polling (`pollAndInject`)**: Rather than relying on a fragile flat `setTimeout` wait of 2.5 seconds, the service worker actively pings the target page context using sequential signals until the content script indicates full load state, securing injection even on slow network connections.
-
----
-
-## 🔒 Security & Privacy
-
-Privacy and permission hygiene are core design principles:
-* **Zero External Hosting**: All data is processed entirely within the local sandbox. There is no remote database, backend server, or usage tracking.
-* **Self-Contained Storage**: Snapshots are saved locally via `chrome.storage.local` and never leave the device.
-* **Tightened Host & Extension Permissions**: Unnecessary broad `"tabs"` permission is removed (relying strictly on `"activeTab"`). `web_accessible_resources` icon declarations are scoped strictly to the 5 supported LLM platform origins (`claude.ai`, `chatgpt.com`, `gemini.google.com`, `grok.com`/`x.com`/`x.ai`, `perplexity.ai`) to prevent extension fingerprinting by arbitrary web pages.
-* **Isolated Shadow DOM Preview**: Content script UI overlays are rendered inside isolated Shadow DOM trees with native font stacks, eliminating remote `@import` network tracking requests on host pages.
-
----
-
-## 🛠️ Challenges & Engineering Decisions
-
-1. **Dynamic DOM Structures**: AI companies update their class names and page structures frequently. We addressed this by relying on robust data attributes (like `data-message-author-role`) and fallback tag-based patterns instead of brittle class selectors.
-2. **SPA State Overrides**: Modern UI frameworks will clear programmatic inputs when state sync is bypassed. Overriding the native HTML input prototypes ensures the virtual DOM registers the injected text correctly.
-3. **Character vs Token Optimization**: Lacking a local token calculator, the extension uses character limits ($80,000$ characters, $\approx 20,000$ tokens) as a guardrail to keep handoff packages within safe boundaries.
-4. **Layout Scale and CSS Keys Consistency**: Rich aesthetic animations (like the glowing letters loader) in extension popups are prone to viewport clipping on high-DPI scaling configurations. We addressed this by sizing loader containers to a compact 120px and sanitizing `@keyframes` syntax to prevent framework overrides.
-
----
-
-## 🗺️ Future Roadmap
-
-* **Vector Database Integration**: Store past sessions in local vector stores using WASM-compiled sqlite-vss to allow semantic searches.
-* **Visual Context Timeline**: A UI timeline visualizing how project structure, decisions, and bugs have evolved over the conversation.
-* **Automated Sync Cloud**: Optional end-to-end encrypted synchronization across user devices.
-* **Context Chain Workspaces**: Multi-session workspaces mapping distinct threads into a unified project context.
-* **Multi-Agent Orchestration**: Dynamic handoff loops that trigger specific local models to run diagnostics or tests.
-
----
-
-## 💡 Why This Project Matters
-
-Cross Context establishes a vendor-agnostic portability layer, giving users the freedom to choose the best model for the job. It mitigates platform lock-in, improves productivity, and moves us closer to a future where user interaction data is open, portable, and secure.
+- [ ] **Local Vector Store:** WASM-powered SQLite-VSS for semantic context search across past chats.
+- [ ] **Visual Context Timeline:** Interactive dependency tree showing how code decisions evolved.
+- [ ] **Cross-Device Sync:** Optional client-side end-to-end encrypted backup.
+- [ ] **Agentic Handoffs:** Structured schema exports for autonomous coding agents (Claude Code, Antigravity, Cursor).
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! If you would like to help improve the project:
-
-1. Fork the repository.
-2. Create a feature branch: `git checkout -b feature/amazing-feature`.
-3. Commit your changes: `git commit -m 'Add amazing feature'`.
-4. Push to the branch: `git push origin feature/amazing-feature`.
-5. Open a Pull Request.
+Contributions, selector updates, and bug fixes are very welcome! Please review the [Contributing Guide](CONTRIBUTING.md) for details on code style, platform testing, and pull request conventions.
 
 ---
 
 ## 📄 License
 
-Distributed under the MIT License. See [LICENSE](LICENSE) for details.
+Distributed under the **MIT License**. See [LICENSE](LICENSE) for details.
 
 ---
 
-## 👥 Credits
+## 👥 Author
 
-* Developed by [Shriraj888](https://github.com/Shriraj888).
-
----
-
-## 🏆 Acknowledgements
-
-* Inspired by the developer community's demand for multi-model workflows.
-* Thanks to the open-source contributors of Chromium extension templates.
+Created and maintained by **[Shriraj888](https://github.com/Shriraj888)**.
