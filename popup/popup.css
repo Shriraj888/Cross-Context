@@ -1199,6 +1199,61 @@ body {
   color: var(--error);
 }
 
+.hover-action-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hover-action-btn.error-pill-btn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #f87171;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hover-action-btn.error-pill-btn:hover {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #fca5a5;
+}
+
+/* AI Preview Error Notice Card */
+.ai-preview-error-card {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.ai-preview-error-card .ai-error-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--error);
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.ai-preview-error-card .ai-error-detail {
+  font-size: 11px;
+  color: #fca5a5;
+  font-family: var(--font-mono, monospace);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+.ai-preview-error-card .ai-error-tip {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 
 /* ── Drag & Drop Utilities ────────────────── */
 

@@ -68,16 +68,64 @@ function _buildPrompt(context, targetPlatform) {
     const handoff = e.handoffPrompt || '';
 
     // List builders helper
-    const bulletJoin = (arr) => (Array.isArray(arr) && arr.length) ? arr.map(x => `• ${x}`).join('\n') : 'None recorded';
-    const codeBlocksJoin = (arr) => {
-      if (!Array.isArray(arr) || !arr.length) return 'No snippets recorded';
-      return arr.map((code, i) => `--- Snippet #${i + 1} ---\n${code}`).join('\n\n');
+    const bulletJoin = (arr) => {
+      if (!Array.isArray(arr) || !arr.length) return 'None recorded';
+      return arr.map(x => {
+        if (typeof x === 'object' && x !== null) {
+          if (x.content) {
+            const score = x.priority_score != null ? `[Priority ${x.priority_score}/10] ` : '';
+            const reason = x.priority_reason ? ` (${x.priority_reason})` : '';
+            return `• ${score}${x.content}${reason}`;
+          }
+          return `• ${JSON.stringify(x)}`;
+        }
+        return `• ${x}`;
+      }).join('\n');
     };
 
-    // §3.1 Fix: Transcript is now always appended to AI-enhanced branches via the
-    // shared helper below. Previously this variable was computed but never used in
-    // any of the five intent-branch return statements.
-    const transcriptSection = buildTranscriptSection(context, src);
+    const codeBlocksJoin = (arr) => {
+      if (!Array.isArray(arr) || !arr.length) return 'No snippets recorded';
+      return arr.map((code, i) => {
+        const trimmed = typeof code === 'string' ? code.trim() : String(code);
+        if (trimmed.startsWith('```') && trimmed.endsWith('```')) {
+          return `--- Snippet #${i + 1} ---\n${trimmed}`;
+        }
+        return `--- Snippet #${i + 1} ---\n\`\`\`\n${trimmed}\n\`\`\``;
+      }).join('\n\n');
+    };
+
+    const formatOptionalSection = (title, items, isCode = false) => {
+      if (!Array.isArray(items) || !items.length) return '';
+      const content = isCode ? codeBlocksJoin(items) : bulletJoin(items);
+      return `\n\n### ${title}\n${content}`;
+    };
+
+    const buildQualityFooter = (e, src, types) => {
+      const q = e.context_quality || {};
+      const s = e.deduplication_stats || {};
+
+      const snr = q.signal_to_noise_ratio != null ? `${q.signal_to_noise_ratio}` : 'High';
+      const completeness = q.context_completeness != null ? `${Math.round(q.context_completeness * 100)}%` : '100%';
+      const readiness = q.transfer_readiness_score != null ? `${q.transfer_readiness_score}/10` : '10/10';
+
+      const tokenRed = s.estimated_token_reduction_percent != null ? `~${Math.round(s.estimated_token_reduction_percent)}%` : null;
+      const dupRemoved = s.duplicate_items_removed != null ? s.duplicate_items_removed : 0;
+      const merged = s.merged_concepts != null ? s.merged_concepts : 0;
+
+      let dedupText = '';
+      if (tokenRed) {
+        dedupText = `\n- 📉 **Optimization Efficiency:** ${tokenRed} token reduction (${dupRemoved} duplicates removed, ${merged} concepts merged)`;
+      }
+
+      return `\n\n---
+
+### 📊 AI Optimization & Quality Metrics
+- 🌐 **Source AI Platform:** ${src}
+- 🏷️ **Conversation Type:** ${types.length ? types.join(', ') : 'General'}
+- 🎯 **Signal-to-Noise Ratio:** ${snr}
+- 📦 **Context Completeness:** ${completeness}
+- ⚡ **Cross-LLM Readiness:** ${readiness}${dedupText}`;
+    };
 
     // Detect Dominant Intent
     const types = Array.isArray(e.conversation_type) ? e.conversation_type.map(t => t.toLowerCase()) : [];
@@ -96,210 +144,215 @@ function _buildPrompt(context, targetPlatform) {
 
     if (dominantIntent === 'coding') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Coding Briefing]
-${idTag}## 🤖 AI Summary
+${idTag}## 🤖 AI Executive Summary
 ${summary}
+
+### 🎯 Objective & Current Intent
+- **Active Task:** ${task}
+- **Developer Intent:** ${intent}
 
 ### 🧠 Priority Memories & Key Context
 ${bulletJoin(e.priority_memories)}
 
----
+### 📁 Technical Stack & Target Files
+- **Tech Stack:** ${tech || 'None specified'}
+- **Target Files:** ${files || 'None recorded'}
 
-I was working on a coding project with ${src}. Here is where we left off:
+### 🔑 Architectural & Technical Decisions
+${decisions || 'None recorded'}
 
-📁 What I was building:
-- Tech Stack: ${tech}
-- Target Files: ${files}
-
-🛠️ Key Code & Configurations:
+### 🛠️ Key Code & Configurations
 ${codeBlocksJoin(e.important_code)}
+${formatOptionalSection('💡 Synthesized Core Concepts', e.deduplicated_context)}
+${formatOptionalSection('✅ Successful Solutions & Working Implementations', e.successful_solutions)}
+${formatOptionalSection('❌ Failed Approaches & Pitfalls to Avoid', e.failed_attempts)}
+${formatOptionalSection('⚙️ User Preferences & Style Guidelines', e.user_preferences)}
+${formatOptionalSection('⚠️ Constraints & Limits', e.constraints)}
+${formatOptionalSection('🤖 AI-Inferred Insights', e.ai_inferred_context)}
+${formatOptionalSection('⚡ Temporary Session Context', e.temporary_context)}
+${formatOptionalSection('🧠 Long-Term Project Memory', e.long_term_memory)}
 
-🔑 Key decisions made so far:
-${decisions}
+### 📋 Pending Tasks & Action Items
+${pending || 'None recorded'}
 
-⚠️ Constraints & Limits:
-${constraints}
-
-🎯 What I was working toward:
-- Objective: ${task}
-- Specific Intent: ${intent}
-
-📋 Tasks I was working on:
-${pending}
-
-🚀 Please continue from:
-${handoff}${transcriptSection}`;
+### 🚀 Next Step Briefing (Continue From Here)
+${handoff}${buildQualityFooter(e, src, types)}`;
     }
 
     if (dominantIntent === 'debugging') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Debugging Briefing]
-${idTag}## 🤖 AI Summary
+${idTag}## 🤖 AI Executive Summary
 ${summary}
+
+### 🎯 Debugging Target & User Intent
+- **Core Target:** ${task}
+- **Developer Intent:** ${intent}
 
 ### 🧠 Priority Memories & Key Context
 ${bulletJoin(e.priority_memories)}
 
----
+### 📁 Environment & Target Files
+- **Tech Stack:** ${tech || 'None specified'}
+- **Target Files:** ${files || 'None recorded'}
 
-I was working on debugging an issue with ${src}. Here is where we left off:
-
-📁 What I was building & testing:
-- Tech Stack: ${tech}
-- Target Files: ${files}
-
-🛠️ Error-Prone Code Snippets:
-${codeBlocksJoin(e.important_code)}
-
-❌ What I was stuck on:
-- Core Debugging Target: ${task}
-- Intent: ${intent}
-- Tracked Errors & Issues:
+### ❌ Tracked Errors, Exceptions & Issues
 ${bulletJoin(e.errors_and_issues)}
 
-💡 Attempted Solves & Solutions:
-- Failed Attempts:
-${bulletJoin(e.failed_attempts)}
-- Successful Solutions:
-${bulletJoin(e.successful_solutions)}
+### 🛠️ Error-Prone Code & Configurations
+${codeBlocksJoin(e.important_code)}
 
-🚀 Please continue from:
-${handoff}${transcriptSection}`;
+### 💡 Attempted Solves & Solutions
+- **Failed Attempts (What didn't work):**
+${bulletJoin(e.failed_attempts)}
+- **Successful Solutions (What worked):**
+${bulletJoin(e.successful_solutions)}
+${formatOptionalSection('🔑 Architectural Decisions & Fix Logic', e.architecture_decisions)}
+${formatOptionalSection('💡 Synthesized Concepts', e.deduplicated_context)}
+${formatOptionalSection('⚙️ User Preferences & Style', e.user_preferences)}
+${formatOptionalSection('⚠️ Constraints & Limits', e.constraints)}
+${formatOptionalSection('🤖 AI-Inferred Root Cause & Insights', e.ai_inferred_context)}
+${formatOptionalSection('⚡ Temporary Session Context', e.temporary_context)}
+${formatOptionalSection('🧠 Long-Term Project Memory', e.long_term_memory)}
+
+### 📋 Pending Tasks & Unresolved Checklist
+${pending || 'None recorded'}
+
+### 🚀 Next Step Briefing (Continue From Here)
+${handoff}${buildQualityFooter(e, src, types)}`;
     }
 
     if (dominantIntent === 'brainstorming') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Brainstorming Briefing]
-${idTag}## 🤖 AI Summary
+${idTag}## 🤖 AI Executive Summary
 ${summary}
+
+### 🎯 Vision, Goal & User Intent
+- **Target Objective:** ${task}
+- **Creative Intent:** ${intent}
 
 ### 🧠 Priority Memories & Key Context
 ${bulletJoin(e.priority_memories)}
 
----
-
-I was brainstorming and planning with ${src}. Here is where we left off:
-
-📁 What I was building/planning:
-- Referenced Files: ${files || 'None recorded'}
-
-💡 Key concepts & ideas developed:
+### 💡 Key Concepts & Ideation
 ${bulletJoin(e.deduplicated_context)}
 
-🧠 Long term project memory:
-${bulletJoin(e.long_term_memory)}
+### 🔑 Key Decisions Made
+${decisions || 'None recorded'}
+${formatOptionalSection('📁 Referenced Files & Documents', e.files_mentioned)}
+${formatOptionalSection('🛠️ Relevant Code Snippets & Mockups', e.important_code, true)}
+${formatOptionalSection('🧠 Long-Term Project Memory', e.long_term_memory)}
+${formatOptionalSection('🤖 AI-Inferred Opportunities & Directions', e.ai_inferred_context)}
+${formatOptionalSection('⚙️ User Preferences & Creative Principles', e.user_preferences)}
+${formatOptionalSection('⚠️ Boundaries, Constraints & Limits', e.constraints)}
+${formatOptionalSection('⚡ Temporary Session Context', e.temporary_context)}
 
-🔑 Key decisions made so far:
-${decisions}
+### 📋 Action Items & Next Exploration Tasks
+${pending || 'None recorded'}
 
-⚠️ Constraints & Limits:
-${constraints}
-
-🎯 What I was working toward:
-- Target Objective: ${task}
-- Intent/Vision: ${intent}
-
-📋 Tasks I was working on:
-${pending}
-
-🚀 Please continue from:
-${handoff}${transcriptSection}`;
+### 🚀 Next Step Briefing (Continue From Here)
+${handoff}${buildQualityFooter(e, src, types)}`;
     }
 
     if (dominantIntent === 'research') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Research Briefing]
-${idTag}## 🤖 AI Summary
+${idTag}## 🤖 AI Executive Summary
 ${summary}
+
+### 🎯 Research Objective & Inquiries
+- **Focus Area:** ${task}
+- **Knowledge Goal:** ${intent}
 
 ### 🧠 Priority Memories & Key Context
 ${bulletJoin(e.priority_memories)}
 
----
-
-I was researching and studying with ${src}. Here is where we left off:
-
-📁 What I was researching:
-- Referenced Files & Sources: ${files || 'None recorded'}
-
-💡 Core concepts discovered:
+### 💡 Core Findings & Synthesized Concepts
 ${bulletJoin(e.deduplicated_context)}
 
-🧠 Long term project memory:
-${bulletJoin(e.long_term_memory)}
-
-🤖 AI-inferred insights:
+### 🤖 AI-Inferred Insights & Synthesis
 ${bulletJoin(e.ai_inferred_context)}
 
-⚙️ My preferences:
-${bulletJoin(e.user_preferences)}
+### 🧠 Long-Term Knowledge & Findings
+${bulletJoin(e.long_term_memory)}
+${formatOptionalSection('📁 Referenced Sources & Files', e.files_mentioned)}
+${formatOptionalSection('🔑 Key Decisions & Validated Facts', e.architecture_decisions)}
+${formatOptionalSection('🛠️ Important Code / Configurations', e.important_code, true)}
+${formatOptionalSection('⚙️ User Research Preferences', e.user_preferences)}
+${formatOptionalSection('⚠️ Constraints, Quotas & Boundaries', e.constraints)}
+${formatOptionalSection('⚡ Temporary Investigation Context', e.temporary_context)}
 
-🎯 What I was working toward:
-- Focus Area: ${task}
-- Knowledge Goal: ${intent}
+### 📋 Pending Research Questions & Next Steps
+${pending || 'None recorded'}
 
-🚀 Please continue from:
-${handoff}${transcriptSection}`;
+### 🚀 Next Step Briefing (Continue From Here)
+${handoff}${buildQualityFooter(e, src, types)}`;
     }
 
     if (dominantIntent === 'writing') {
       return `[🔄 AI-Enhanced Cross Context Transfer — Writing Briefing]
-${idTag}## 🤖 AI Summary
+${idTag}## 🤖 AI Executive Summary
 ${summary}
+
+### 🎯 Composition Target & Creative Intent
+- **Current Target:** ${task}
+- **Creative Intent:** ${intent}
 
 ### 🧠 Priority Memories & Key Context
 ${bulletJoin(e.priority_memories)}
 
----
-
-I was drafting and composing text with ${src}. Here is where we left off:
-
-📁 What I was writing:
-- Referenced Documents: ${files || 'None recorded'}
-
-💡 Synthesized ideas & guidelines:
+### 💡 Synthesized Ideas & Content Guidelines
 ${bulletJoin(e.deduplicated_context)}
 
-⚙️ My style preferences:
+### ⚙️ Style Preferences & Tone Guidelines
 ${bulletJoin(e.user_preferences)}
+${formatOptionalSection('📁 Referenced Documents & Sources', e.files_mentioned)}
+${formatOptionalSection('🔑 Key Content Decisions', e.architecture_decisions)}
+${formatOptionalSection('🧠 Long-Term Document Memory', e.long_term_memory)}
+${formatOptionalSection('🤖 AI-Inferred Tone & Context', e.ai_inferred_context)}
+${formatOptionalSection('⚠️ Content Constraints & Word Limits', e.constraints)}
+${formatOptionalSection('⚡ Temporary Draft Context', e.temporary_context)}
 
-🎯 What I was working toward:
-- Current Target: ${task}
-- Creative Intent: ${intent}
+### 📋 Next Composition Steps & Revisions
+${pending || 'None recorded'}
 
-📋 Next composition steps:
-${pending}
-
-🚀 Please continue from:
-${handoff}${transcriptSection}`;
+### 🚀 Next Step Briefing (Continue From Here)
+${handoff}${buildQualityFooter(e, src, types)}`;
     }
 
     // General fallback
     return `[🔄 AI-Enhanced Cross Context Transfer — Briefing]
-${idTag}## 🤖 AI Summary
+${idTag}## 🤖 AI Executive Summary
 ${summary}
+
+### 🎯 Target Objective & User Intent
+- **Current Task:** ${task}
+- **Intent:** ${intent}
 
 ### 🧠 Priority Memories & Key Context
 ${bulletJoin(e.priority_memories)}
 
----
+### 💡 Synthesized Core Context
+${bulletJoin(e.deduplicated_context)}
 
-I was working on a project with ${src}. Here is where we left off:
+### 📁 Technical Stack & Referenced Files
+- **Stack:** ${tech || 'None specified'}
+- **Files:** ${files || 'None recorded'}
 
-📁 What I was building:
-- Tech Stack & Active Files: Stack: ${tech} | Files: ${files}
+### 🔑 Key Decisions Made
+${decisions || 'None recorded'}
+${formatOptionalSection('🛠️ Key Code & Configurations', e.important_code, true)}
+${formatOptionalSection('✅ Successful Solutions', e.successful_solutions)}
+${formatOptionalSection('❌ Tracked Errors & Issues', e.errors_and_issues)}
+${formatOptionalSection('⚙️ User Preferences & Guidelines', e.user_preferences)}
+${formatOptionalSection('⚠️ Constraints & Limits', e.constraints)}
+${formatOptionalSection('🤖 AI-Inferred Context & Insights', e.ai_inferred_context)}
+${formatOptionalSection('⚡ Temporary Session Context', e.temporary_context)}
+${formatOptionalSection('🧠 Long-Term Project Memory', e.long_term_memory)}
 
-🔑 Key decisions made so far:
-${decisions}
+### 📋 Pending Tasks & Next Steps
+${pending || 'None recorded'}
 
-⚠️ Constraints & Limits:
-${constraints}
-
-🎯 What I was working toward:
-- Task: ${task}
-- Intent: ${intent}
-
-📋 Tasks I was working on:
-${pending}
-
-🚀 Please continue from:
-${handoff}${transcriptSection}`;
+### 🚀 Next Step Briefing (Continue From Here)
+${handoff}${buildQualityFooter(e, src, types)}`;
   }
 
   // ──────────────────────────────────────────────────────────────

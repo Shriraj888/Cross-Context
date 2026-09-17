@@ -317,6 +317,8 @@ function createContextCard(ctx) {
     card.setAttribute('title', 'Drag and drop this conversation into an active AI chat page to continue or share context');
   }
 
+  const errorMsg = ctx.aiError ? `AI Failed: ${escapeHtml(ctx.aiError)}` : 'AI Failed — Check Gemini API Key & model in settings';
+
   let aiBadgeHtml = '';
   if (ctx.aiStatus === 'pending') {
     aiBadgeHtml = `
@@ -343,7 +345,7 @@ function createContextCard(ctx) {
       </svg>
     </span>`;
   } else if (ctx.aiStatus === 'failed') {
-    aiBadgeHtml = `<span class="card-ai-badge failed" title="AI Failed">
+    aiBadgeHtml = `<span class="card-ai-badge failed" title="${errorMsg}">
       <svg class="ai-badge-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="12" y1="8" x2="12" y2="12"></line>
@@ -401,11 +403,23 @@ function createContextCard(ctx) {
           <span>Preview</span>
         </button>
       </div>
-      <button class="hover-action-btn delete-btn" data-action="delete" data-id="${ctx.id}" title="Delete Context">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
-        </svg>
-      </button>
+      <div class="hover-action-right">
+        ${ctx.aiStatus === 'failed' ? `
+          <button class="hover-action-btn error-pill-btn" data-action="show-error" data-id="${ctx.id}" title="${errorMsg}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="17"/>
+            </svg>
+            <span>AI Error</span>
+          </button>
+        ` : ''}
+        <button class="hover-action-btn delete-btn" data-action="delete" data-id="${ctx.id}" title="Delete Context">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+          </svg>
+        </button>
+      </div>
     </div>
   `;
 
@@ -518,6 +532,10 @@ function bindEvents() {
       handleDeleteContext(id);
     } else if (action === 'copy') {
       handleDirectCopy(id);
+    } else if (action === 'show-error') {
+      const targetCtx = savedContexts.find(c => c.id === id);
+      const detail = targetCtx?.aiError || 'Gemini processing failed. Please check your Gemini API key in Settings.';
+      showToast(`⚠️ AI Error: ${detail}`, 'error', 6000);
     }
   });
 
@@ -1185,10 +1203,26 @@ function renderPreviewContent(ctx) {
     tokenBadgeTooltip = `⚡ ~${tokenEstimate.toLocaleString()} tokens`;
   }
 
+  const errorBannerHtml = ctx.aiStatus === 'failed' ? `
+    <div class="ai-preview-error-card">
+      <div class="ai-error-header">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="17"/>
+        </svg>
+        <span>AI Scrape Optimization Encountered an Error</span>
+      </div>
+      <div class="ai-error-detail">${escapeHtml(ctx.aiError || 'Gemini processing failed')}</div>
+      <div class="ai-error-tip">Check your Gemini API Key and active model in Settings (⚙️). Raw conversation data is preserved below.</div>
+    </div>
+  ` : '';
+
   const mdPreviewDiv = document.createElement('div');
   mdPreviewDiv.className = 'context-md-view';
 
   mdPreviewDiv.innerHTML = `
+    ${errorBannerHtml}
     <div class="context-md-header-card">
       <div class="context-md-title-row">
         <div class="context-md-file-badge">
