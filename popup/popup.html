@@ -58,6 +58,19 @@
           <span id="current-platform-label" class="console-platform-name">Detecting active AI chat…</span>
         </div>
       </div>
+      <!-- ── Supported Platforms Banner (Shown when page is unsupported) ── -->
+      <div id="supported-platforms-banner" class="supported-platforms-banner hidden">
+        <div class="supported-platforms-header">
+          <svg class="supported-info-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          <span class="supported-platforms-title">Supported platforms</span>
+        </div>
+        <div class="supported-platforms-chips" id="supported-platforms-chips"></div>
+      </div>
+
       <div class="capture-buttons-container">
         <button id="btn-capture" class="btn-capture btn-secondary" title="Scrape Text — fast local scraping of conversation text" disabled>
           <svg class="btn-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

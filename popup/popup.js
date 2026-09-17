@@ -92,6 +92,7 @@ const emptyState          = $('empty-state');
 const contextCountBadge   = $('context-count');
 const toast               = $('toast');
 const dragInstructionBanner = $('drag-instruction-banner');
+const supportedPlatformsBanner = $('supported-platforms-banner');
 
 const previewModal        = $('preview-modal');
 const previewClose        = $('preview-close');
@@ -188,7 +189,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function detectCurrentTab() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.url) return;
+    if (!tab || !tab.url) {
+      handleUnsupportedPlatform();
+      return;
+    }
 
     const url = new URL(tab.url);
     const hostname = url.hostname;
@@ -207,35 +211,75 @@ async function detectCurrentTab() {
         
         btnCapture.disabled = false;
         btnCaptureAi.disabled = false;
+
+        if (supportedPlatformsBanner) {
+          supportedPlatformsBanner.classList.add('hidden');
+        }
         return;
       }
     }
 
-    currentPlatformLabel.textContent = 'Open an AI chat to scrape context';
-    platformDot.className = 'platform-dot';
-    platformDot.innerHTML = `
-      <svg class="radar-scan-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-      </svg>
-    `;
-    platformDot.style.color = 'var(--text-muted)';
-    consoleCard.className = 'console-card inactive';
-    btnCapture.disabled = true;
-    btnCaptureAi.disabled = true;
+    handleUnsupportedPlatform('Open an AI chat to scrape context');
 
   } catch (err) {
-    currentPlatformLabel.textContent = 'Could not detect page';
-    platformDot.className = 'platform-dot';
-    platformDot.innerHTML = `
-      <svg class="radar-scan-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-      </svg>
-    `;
-    platformDot.style.color = 'var(--text-muted)';
-    consoleCard.className = 'console-card inactive';
-    btnCapture.disabled = true;
-    btnCaptureAi.disabled = true;
+    handleUnsupportedPlatform('Could not detect page');
   }
+}
+
+function handleUnsupportedPlatform(message = 'Open an AI chat to scrape context') {
+  currentTabPlatform = null;
+  currentPlatformLabel.textContent = message;
+  platformDot.className = 'platform-dot';
+  platformDot.innerHTML = `
+    <svg class="radar-scan-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+    </svg>
+  `;
+  platformDot.style.color = 'var(--text-muted)';
+  consoleCard.className = 'console-card inactive';
+  btnCapture.disabled = true;
+  btnCaptureAi.disabled = true;
+
+  if (supportedPlatformsBanner) {
+    renderSupportedPlatformsBanner();
+    supportedPlatformsBanner.classList.remove('hidden');
+  }
+}
+
+function renderSupportedPlatformsBanner() {
+  const container = $('supported-platforms-chips');
+  if (!container || container.children.length > 0) return;
+
+  const platforms = [
+    { key: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com', color: '#10b981' },
+    { key: 'claude', name: 'Claude', url: 'https://claude.ai', color: '#f97316' },
+    { key: 'gemini', name: 'Gemini', url: 'https://gemini.google.com', color: '#3b82f6' },
+    { key: 'grok', name: 'Grok', url: 'https://grok.com', color: '#f4f4f5' },
+    { key: 'perplexity', name: 'Perplexity', url: 'https://www.perplexity.ai', color: '#0ea5e9' }
+  ];
+
+  container.innerHTML = platforms.map(p => `
+    <a href="${p.url}" class="supported-chip chip-${p.key}" data-url="${p.url}" title="Open ${p.name}">
+      <span class="chip-logo" style="color: ${p.color};">
+        ${getPlatformIcon(p.key, 14)}
+      </span>
+      <span class="chip-name">${p.name}</span>
+    </a>
+  `).join('');
+
+  container.querySelectorAll('.supported-chip').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetUrl = link.getAttribute('data-url');
+      if (targetUrl) {
+        if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
+          chrome.tabs.create({ url: targetUrl });
+        } else {
+          window.open(targetUrl, '_blank');
+        }
+      }
+    });
+  });
 }
 
 // ──────────────────────────────────────────
