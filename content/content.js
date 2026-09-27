@@ -1657,30 +1657,28 @@
    */
   async function attachMarkdownFile(content, dropTargetSelector, fileName = 'context.md') {
     const fileInputs = document.querySelectorAll('input[type="file"]');
-    if (fileInputs.length === 0) {
-      return { success: false, method: 'none', error: 'No file input found' };
-    }
-
     // Use text/plain MIME type — some platforms (e.g. Gemini) reject text/markdown
     const file = new File([content], fileName, { type: 'text/plain' });
 
     // Strategy 1: Find a visible <input type="file"> and set its files via DataTransfer
-    for (const fileInput of fileInputs) {
-      const accept = (fileInput.getAttribute('accept') || '').toLowerCase();
-      // Skip image-only inputs
-      if (accept && accept.includes('image/') && !accept.includes('*/*') && !accept.includes('.md') && !accept.includes('text/')) {
-        continue;
-      }
-      try {
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        fileInput.files = dt.files;
-        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        fileInput.dispatchEvent(new Event('input', { bubbles: true }));
-        await sleep(150);
-        return { success: true, method: 'file-input' };
-      } catch (_) {
-        // Next input
+    if (fileInputs.length > 0) {
+      for (const fileInput of fileInputs) {
+        const accept = (fileInput.getAttribute('accept') || '').toLowerCase();
+        // Skip image-only inputs
+        if (accept && accept.includes('image/') && !accept.includes('*/*') && !accept.includes('.md') && !accept.includes('text/')) {
+          continue;
+        }
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          fileInput.files = dt.files;
+          fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+          fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+          await sleep(150);
+          return { success: true, method: 'file-input' };
+        } catch (_) {
+          // Next input
+        }
       }
     }
 
@@ -4022,7 +4020,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
     return {
       success: (tgtPlatform) => {
         if (ol) {
-          ol.classList.remove('injecting');
+          ol.classList.remove('injecting', 'error-state');
           ol.classList.add('success');
         }
         if (arrowEl) arrowEl.innerHTML  = CHECK_SVG;
@@ -4035,7 +4033,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       },
       fail: (errorMsg) => {
         if (ol) {
-          ol.classList.remove('injecting');
+          ol.classList.remove('injecting', 'success');
           ol.classList.add('error-state');
         }
         if (arrowEl) arrowEl.innerHTML  = ERROR_SVG;
@@ -4105,6 +4103,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
   });
 
   window.addEventListener('dragenter', (e) => {
+    if (!e.isTrusted) return;
     if (!checkCrossContextDrag(e)) return;
     dragEnterCount++;
     if (dragEnterCount === 1 && !dropOverlayHost) {
@@ -4114,6 +4113,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
   }, true);
 
   window.addEventListener('dragover', (e) => {
+    if (!e.isTrusted) return;
     if (!checkCrossContextDrag(e)) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
@@ -4129,6 +4129,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
   }, true);
 
   window.addEventListener('dragleave', (e) => {
+    if (!e.isTrusted) return;
     if (!dropOverlayHost) return;
     dragEnterCount = Math.max(0, dragEnterCount - 1);
     if (dragEnterCount === 0) {
@@ -4141,10 +4142,16 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
   }, true);
 
   window.addEventListener('drop', async (e) => {
+    // Guard against synthetic drop events dispatched internally by injectors
+    // (e.g. Gemini, Perplexity, attachMarkdownFile) that bubble up to window.
+    if (!e.isTrusted) return;
+    // Guard against simultaneous drop handling
+    if (isInjectionActive) return;
     if (!dropOverlayHost) return;
 
     e.preventDefault();
     e.stopPropagation();
+    isInjectionActive = true;
     dragEnterCount = 0;
     ccDragActive = false;
 
@@ -4155,7 +4162,7 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
     const arrowEl = dropOverlayShadow?.getElementById('cc-drop-arrow');
 
     // Move to injecting state immediately (visible to user)
-    if (ol)    { ol.classList.remove('over'); ol.classList.add('injecting'); }
+    if (ol)    { ol.classList.remove('over', 'error-state'); ol.classList.add('injecting'); }
     if (arrowEl) arrowEl.innerHTML  = SPINNER_SVG;
     if (titleEl) titleEl.textContent = 'Injecting...';
     if (subEl)   subEl.textContent   = 'Reading conversation…';
@@ -4191,11 +4198,15 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
 
     const hasFallbackText = plainText && (plainText.includes('Cross-Context') || plainText.includes('Cross Context'));
     if (!contextId && !hasFallbackText) {
-      if (ol) ol.classList.add('error-state');
+      if (ol) {
+        ol.classList.remove('injecting', 'success');
+        ol.classList.add('error-state');
+      }
       if (arrowEl) arrowEl.innerHTML  = ERROR_SVG;
-      if (titleEl) titleEl.textContent = 'Drop failed';
+      if (titleEl) titleEl.textContent = 'Injection failed';
       if (subEl)   subEl.textContent   = 'Could not find context ID or fallback payload.';
       setTimeout(removeDropOverlay, 2500);
+      setTimeout(() => { isInjectionActive = false; }, 2500);
       return;
     }
 
@@ -4237,7 +4248,10 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       if (!result?.success) throw new Error(result?.error || 'Injection returned failure.');
 
       // ✅ Success
-      if (ol) { ol.classList.remove('injecting'); ol.classList.add('success'); }
+      if (ol) {
+        ol.classList.remove('injecting', 'error-state');
+        ol.classList.add('success');
+      }
       if (arrowEl) arrowEl.innerHTML  = CHECK_SVG;
       if (titleEl) titleEl.textContent = 'Context injected!';
       if (subEl) {
@@ -4247,11 +4261,16 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
       setTimeout(removeDropOverlay, 2000);
 
     } catch (err) {
-      if (ol) { ol.classList.remove('injecting'); ol.classList.add('error-state'); }
+      if (ol) {
+        ol.classList.remove('injecting', 'success');
+        ol.classList.add('error-state');
+      }
       if (arrowEl) arrowEl.innerHTML  = ERROR_SVG;
       if (titleEl) titleEl.textContent = 'Injection failed';
       if (subEl)   subEl.textContent   = err.message || 'An unexpected error occurred.';
       setTimeout(removeDropOverlay, 3500);
+    } finally {
+      setTimeout(() => { isInjectionActive = false; }, 2000);
     }
   }, true);
 
@@ -4346,15 +4365,15 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
         if (result?.success) {
           anim.success(message.targetPlatform);
         } else {
-          isInjectionActive = false;
           anim.fail(result?.error || 'Injection failed');
         }
         chrome.storage.local.remove('pendingInjection');
         sendResponse(result);
       }).catch(err => {
-        isInjectionActive = false;
         anim.fail(err.message || 'Injection failed');
         sendResponse({ success: false, error: err.message });
+      }).finally(() => {
+        setTimeout(() => { isInjectionActive = false; }, 2000);
       });
       return true;
     }
@@ -4423,12 +4442,12 @@ Please acknowledge these details. Tell me what tasks you are taking over, and as
         if (result?.success) {
           anim.success(targetPlatform);
         } else {
-          isInjectionActive = false;
           anim.fail(result?.error || 'Injection failed');
         }
       } catch (err) {
-        isInjectionActive = false;
         anim.fail(err.message || 'Injection failed');
+      } finally {
+        setTimeout(() => { isInjectionActive = false; }, 2000);
       }
 
       await chrome.storage.local.remove('pendingInjection');
