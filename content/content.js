@@ -2,6 +2,13 @@
 // Runs on all supported LLM pages
 // NOTE: Content scripts cannot use ES module dynamic import().
 // All platform logic is bundled inline here.
+//
+// @author      Shriraj888 <https://github.com/Shriraj888>
+// @source      https://github.com/Shriraj888/Cross-Context
+// @license     MIT
+// @copyright   © 2026 Shriraj888. All rights reserved.
+
+/* WATERMARK: Cross-Context · Shriraj888 · github.com/Shriraj888/Cross-Context */
 
 (async () => {
   'use strict';

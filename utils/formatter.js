@@ -1,5 +1,12 @@
 // Cross Context — Context Formatter
 // Converts scraped messages into a structured handoff prompt
+//
+// @author      Shriraj888 <https://github.com/Shriraj888>
+// @source      https://github.com/Shriraj888/Cross-Context
+// @license     MIT
+// @copyright   © 2026 Shriraj888. All rights reserved.
+
+/* WATERMARK: Cross-Context · Shriraj888 · github.com/Shriraj888/Cross-Context */
 
 const MAX_TURNS = 40; // max message turns to include
 const CHAR_LIMIT = 80000; // ~20k tokens safety limit

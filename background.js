@@ -1,5 +1,26 @@
 // Cross Context — Background Service Worker
 // Handles messaging between popup and content scripts
+//
+// @author      Shriraj888 <https://github.com/Shriraj888>
+// @source      https://github.com/Shriraj888/Cross-Context
+// @license     MIT
+// @copyright   © 2026 Shriraj888. All rights reserved.
+
+/* WATERMARK: Cross-Context · Shriraj888 · github.com/Shriraj888/Cross-Context */
+
+// ──────────────────────────────────────────────
+// Runtime Watermark (chrome.runtime.getManifest)
+// ──────────────────────────────────────────────
+(function () {
+  const { name, version, author, homepage_url } = chrome.runtime.getManifest();
+  console.info(
+    `%c✦ ${name} v${version}`,
+    'color:#a78bfa;font-weight:700;font-size:14px;',
+    `\n  Author : ${author}`,
+    `\n  Source : ${homepage_url ?? 'https://github.com/Shriraj888/Cross-Context'}`,
+    `\n  © 2026 Shriraj888. All rights reserved.`
+  );
+})();
 
 const MAX_SAVED_CONTEXTS = 10;
 const MAX_IMAGE_FETCH_BYTES = 2 * 1024 * 1024;

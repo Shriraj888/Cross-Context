@@ -1,4 +1,11 @@
 // Cross Context — Storage Helpers
+//
+// @author      Shriraj888 <https://github.com/Shriraj888>
+// @source      https://github.com/Shriraj888/Cross-Context
+// @license     MIT
+// @copyright   © 2026 Shriraj888. All rights reserved.
+
+/* WATERMARK: Cross-Context · Shriraj888 · github.com/Shriraj888/Cross-Context */
 
 /**
  * Save a new context to local storage
